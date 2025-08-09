@@ -1,8 +1,9 @@
-streamlit
-pandas
-numpy
-plotly
-scikit-learn
-joblib
-xgboost
-pyarrow
+streamlit>=1.37
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.9
+plotly>=5.22
+scikit-learn>=1.5
+scipy>=1.13
+joblib>=1.4
+pyarrow>=16  
