@@ -593,112 +593,79 @@ def create_market_evolution_timeline(df: pd.DataFrame) -> go.Figure:
     return fig
 from streamlit_plotly_events import plotly_events
 
-def build_mech_network_fig_interactive(
-    synergies_df: pd.DataFrame,
-    top_n: int = 30,
-    selected_node: str | None = None,
-    show_node_labels: bool = False,   # <— toggle labels
-):
+def build_mech_network_fig_static(synergies_df: pd.DataFrame, top_n: int = 30) -> go.Figure:
     if synergies_df is None or len(synergies_df) == 0:
-        return go.Figure().add_annotation(text="Insufficient data for network graph", showarrow=False), 0, []
+        return go.Figure().add_annotation(text="Insufficient data for network graph", showarrow=False)
 
     df = synergies_df.copy().sort_values(["Success Rate", "Games"], ascending=False).head(top_n).reset_index(drop=True)
 
-    # Nodes & layout
+    # Nodes and circular layout
     nodes = sorted(set(df["Mechanic 1"]).union(set(df["Mechanic 2"])))
-    node_idx = {n: i for i, n in enumerate(nodes)}
     n = len(nodes)
-    theta = np.linspace(0, 2*np.pi, n, endpoint=False) if n else np.array([])
-    x = np.cos(theta); y = np.sin(theta)
+    if n == 0:
+        return go.Figure().add_annotation(text="No mechanics to display", showarrow=False)
 
-    # Edge visual scaling (robust)
+    node_idx = {name: i for i, name in enumerate(nodes)}
+    theta = np.linspace(0, 2*np.pi, n, endpoint=False)
+    x = np.cos(theta)
+    y = np.sin(theta)
+
+    # Edge visual scaling
     s = df["Success Rate"].astype(float).clip(0, 1)
     if (s.max() - s.min()) < 0.05 and len(s) > 1:
-        m = s.rank(method="dense", pct=True)
+        m = s.rank(method="dense", pct=True)     # keep visible spread when range is tiny
     else:
         m = (s - s.min()) / max(1e-9, s.max() - s.min())
-    widths = 1.5 + m * (10.0 - 1.5)
+
+    widths = 2.0 + m * (10.0 - 2.0)
     edge_colors = [px.colors.sample_colorscale("YlGnBu", float(v))[0] for v in m]
 
-    # Adjacency & node strength
-    adj = {n: set() for n in nodes}
-    strength = np.zeros(n)
-    for sr, row in zip(s, df.itertuples(index=False)):
-        a, b = row[0], row[1]
-        ia, ib = node_idx[a], node_idx[b]
-        adj[a].add(b); adj[b].add(a)
-        strength[ia] += float(sr); strength[ib] += float(sr)
-
     fig = go.Figure()
-    selected_node = selected_node if selected_node in adj else None
-    connected = adj.get(selected_node, set()) if selected_node else set()
-    fade_edge_color = "rgba(180,180,180,0.10)"
 
-    # --- Edges (only edges show hover; concise) ---
+    # --- Edges first (under the nodes) ---
     for i, row in df.iterrows():
         a, b = row["Mechanic 1"], row["Mechanic 2"]
         ia, ib = node_idx[a], node_idx[b]
-        is_highlight = (selected_node is None) or (a == selected_node or b == selected_node)
         fig.add_trace(go.Scatter(
             x=[x[ia], x[ib]], y=[y[ia], y[ib]],
             mode="lines",
-            line=dict(width=float(widths[i]) if is_highlight else 1.0,
-                      color=edge_colors[i] if is_highlight else fade_edge_color),
+            line=dict(width=float(widths[i]), color=edge_colors[i]),
+            opacity=0.75,
             hovertemplate=f"{a} + {b} • SR {row['Success Rate']*100:.0f}% • n={int(row['Games'])}<extra></extra>",
             showlegend=False
         ))
 
-    # --- Nodes (visible, outlined; hover off to avoid clutter) ---
-    size_min, size_max = 16.0, 30.0
-    node_sizes = (np.full(n, 20.0) if strength.max() <= 0 else
-                  size_min + (strength - strength.min()) / (strength.max() - strength.min() + 1e-9) * (size_max - size_min))
-
-    node_colors, node_opacities = [], []
-    for name in nodes:
-        if selected_node is None or name == selected_node or name in connected:
-            node_colors.append(CHART_COLORS[1]); node_opacities.append(1.0)
-        else:
-            node_colors.append("rgba(160,160,160,1)"); node_opacities.append(0.25)
-
-    node_text = [n.replace("Mechanic_", "") for n in nodes] if show_node_labels else None
-
-    # Nodes trace MUST be indexed for click pick-up
+    # --- Nodes on top (always visible) ---
+    label_text = [n.replace("Mechanic_", "") for n in nodes]
     fig.add_trace(go.Scatter(
         x=x, y=y,
-        mode="markers+text" if show_node_labels else "markers",
-        marker=dict(
-            size=node_sizes,
-            color=node_colors,
-            opacity=node_opacities,
-            line=dict(width=1.5, color="rgba(0,0,0,0.25)"),   # outline so nodes never disappear
-        ),
-        text=node_text,
+        mode="markers+text",
+        text=label_text,
         textposition="top center",
-        hoverinfo="skip",          # <— no node hover, edges only
+        hovertemplate="%{text}<extra></extra>",
+        marker=dict(
+            size=22,                             # fixed, visible size
+            color=ACCENT,                        # your theme color
+            opacity=1.0,
+            symbol="circle",
+            line=dict(width=2, color="rgba(0,0,0,0.35)")  # outline so they never disappear
+        ),
         showlegend=False
     ))
-    node_curve_idx = len(fig.data) - 1
 
-    # Colorbar stub for success rate (no hover)
-    if len(s) > 0:
-        cmin, cmax = float(s.min()), float(s.max())
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode="markers",
-            marker=dict(colorscale="YlGnBu", cmin=cmin, cmax=cmax, color=[cmin, cmax], size=0,
-                        colorbar=dict(title="Success rate", tickformat=".0%")),
-            hoverinfo="skip", showlegend=False
-        ))
-
+    # Layout / axes
     fig.update_layout(
-        title=("Mechanic Synergy Network" + (f" — {selected_node}" if selected_node else "")),
-        height=520,
-        plot_bgcolor=CHART_BG, paper_bgcolor=CHART_BG, font_color=MUTED,
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
+        title="Mechanic Synergy Network",
+        height=540,
+        plot_bgcolor=CHART_BG,
+        paper_bgcolor=CHART_BG,
+        font_color=MUTED,
+        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, scaleanchor="y", scaleratio=1),
         yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         margin=dict(t=60, r=20, l=20, b=20),
-        hovermode="closest"    # <— only one hover at a time
+        hovermode="closest"
     )
-    return fig, node_curve_idx, nodes
+    return fig
 
 
 def create_mechanic_network_graph(synergies_df: pd.DataFrame, top_n: int = 30) -> go.Figure:
@@ -2524,22 +2491,9 @@ with tab_synergies:
         
         # Network visualization
         # --- Interactive network ---
-        st.markdown("### 🌐 Mechanic Relationship Network (click a node to focus)")
-
-        show_labels = st.checkbox("Show node labels", value=False, key="mech_show_labels")
-        
-        sel_key = "mech_selected_node"
-        selected_node = st.session_state.get(sel_key, None)
-        
-        fig_network, node_curve_idx, node_names = build_mech_network_fig_interactive(
-            synergies, top_n=30, selected_node=selected_node, show_node_labels=show_labels
-        )
-        
-        events = plotly_events(
-            fig_network,
-            click_event=True, select_event=False, hover_event=False,
-            override_height=520, override_width="100%"
-        )
+        st.markdown("### 🌐 Mechanic Relationship Network")
+        fig_network = build_mech_network_fig_static(synergies, top_n=30)
+        st.plotly_chart(fig_network, use_container_width=True)
         
         if events:
             ev = events[0]
@@ -2656,6 +2610,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
