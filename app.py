@@ -1336,7 +1336,7 @@ with tab_wizard:
         st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
         
         additional_cols = st.columns(3)
-        )
+        
         with additional_cols[2]:
             target_price = st.slider("Target MSRP ($)", 20, 150, 50, 5)
             component_quality = st.select_slider("Component Quality",
@@ -2533,6 +2533,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
