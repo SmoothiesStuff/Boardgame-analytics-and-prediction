@@ -79,6 +79,7 @@ MODEL_PATHS = {
     "sales_rf": "models/sales_rf.joblib",
     "sales_xgb": "models/sales_xgb.joblib",
 }
+INPUT_SCALER_PATH = "models/input_scaler.joblib"
 
 CURRENT_YEAR = 2025
 
@@ -192,20 +193,61 @@ def nearest_neighbors_in_cluster(input_scaled, cluster_id: int, df_full: pd.Data
 def load_models(paths: Dict[str, str]):
     models = {}
     for key, path in paths.items():
-        if os.path.exists(path):
-            try:
-                models[key] = joblib_load(path)
-            except Exception as e:
-                st.warning(f"Could not load {key} at {path}: {e}")
+        if not os.path.exists(path):
+            st.warning(f"Model missing: {key} → {path}")
+            continue
+        try:
+            models[key] = joblib_load(path)
+            st.caption(f"✅ Loaded model: {key} from {path}")
+        except ImportError as e:
+            st.error(f"{key}: missing dependency while loading → {e}")
+        except Exception as e:
+            st.exception(e)
+
+    # Load optional input scaler if present
+    try:
+        if os.path.exists(INPUT_SCALER_PATH):
+            models["_input_scaler"] = joblib_load(INPUT_SCALER_PATH)
+            st.caption("✅ Loaded input scaler")
+        else:
+            st.info("ℹ️ No input scaler file found (models/input_scaler.joblib).")
+    except Exception as e:
+        st.warning(f"Could not load input scaler: {e}")
+
+    if not models:
+        st.info("No models loaded. Ensure files exist and dependencies match training env.")
     return models
+
+def _align_features(model, X_input_df: pd.DataFrame) -> pd.DataFrame:
+    # If the model knows its training columns, align to them
+    if hasattr(model, "feature_names_in_"):
+        cols = list(model.feature_names_in_)
+        return X_input_df.reindex(columns=cols, fill_value=0)
+    return X_input_df
 
 def predict_with_models(models: Dict, X_input_df: pd.DataFrame) -> Dict[str, float | None]:
     out = {}
+    input_scaler = models.get("_input_scaler", None)
+
     for key, model in models.items():
+        if key.startswith("_"):  # skip helper objects like the scaler
+            continue
         try:
-            out[key] = float(model.predict(X_input_df)[0])
-        except Exception:
+            Xa = _align_features(model, X_input_df)
+
+            # If you saved the scaler separately (not inside a Pipeline), apply it
+            if input_scaler is not None and not hasattr(model, "named_steps"):
+                try:
+                    Xa = pd.DataFrame(input_scaler.transform(Xa), columns=Xa.columns)
+                except Exception as e:
+                    st.warning(f"Scaler transform failed for {key}: {e}")
+
+            pred = model.predict(Xa)
+            out[key] = float(pred[0])
+        except Exception as e:
+            st.error(f"Prediction failed for {key}: {e}")
             out[key] = None
+
     return out
 
 # Visualization functions
@@ -1289,6 +1331,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
