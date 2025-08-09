@@ -2528,7 +2528,6 @@ with tab_synergies:
         fig_network = build_mech_network_fig_static(synergies, top_n=30)
         st.plotly_chart(fig_network, use_container_width=True)
         
-                st.caption(f"Focused on: **{selected_node}**")
         narr("""
         **Mechanics that work.** Certain combinations produce clean decision space—worker placement with a market, 
         co-op with variable powers, drafting with tempo pressure. Resist feature creep. Anchor on one or two core systems 
@@ -2628,6 +2627,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
