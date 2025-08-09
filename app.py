@@ -706,63 +706,80 @@ def create_success_predictor_chart(df: pd.DataFrame, x_col: str, y_col: str = "A
     return fig
 
 # Profile presets with market-driven insights
+# Profile presets with market-aligned defaults (3×3 grid)
 PROFILE_PRESETS = {
     "🎉 Family Party Game": {
-        "description": "Accessible, social games perfect for casual gatherings",
+        "description": "Accessible, social games for casual tables",
         "cats": ["Cat:Family", "Cat:Party"],
-        "mechs_on": ["Set Collection", "Hand Management", "Voting", "Take That"],
-        "year": CURRENT_YEAR, "min_players": 3, "max_players": 8, 
-        "play_time": 30, "min_age": 8, "weight": 1.8,
-        "market_insight": "Family games with 20-40 minute play times have seen 40% growth since 2020"
+        "mechs_on": ["Set Collection", "Dice Rolling"],
+        "year": CURRENT_YEAR, "min_players": 3, "max_players": 8,
+        "play_time": 30, "min_age": 8, "weight": 1.7,
+        "market_insight": "Short, upbeat play with simple combos tends to travel well across groups."
     },
     "🤝 Cooperative Strategy": {
-        "description": "Team-based strategic challenges with deep decision making",
+        "description": "Team vs game with clear roles and powers",
         "cats": ["Cat:Thematic", "Cat:Strategy"],
-        "mechs_on": ["Cooperative Game", "Action Points", "Variable Player Powers"],
-        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4, 
+        "mechs_on": ["Cooperative Game", "Variable Player Powers", "Action Points"],
+        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 60, "min_age": 12, "weight": 2.6,
-        "market_insight": "Co-op games with solo modes have 2x the ownership of multiplayer-only titles"
+        "market_insight": "1–4 players with solo support and distinct roles is the common backbone."
     },
     "🏛️ Heavy Euro Game": {
-        "description": "Complex economic engines for serious strategists",
+        "description": "Deep economic engines and tight efficiency puzzles",
         "cats": ["Cat:Strategy", "Economic"],
-        "mechs_on": ["Network and Route Building", "Market", "Worker Placement"],
-        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4, 
+        "mechs_on": ["Worker Placement", "Market", "Network and Route Building"],
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 120, "min_age": 14, "weight": 3.6,
-        "market_insight": "Heavy euros (3.5+ complexity) targeting 90-120 minutes outperform 150+ minute games"
+        "market_insight": "2–4 players, 90–150 minutes, and crisp resource tension dominate the space."
     },
     "⚔️ Thematic Adventure": {
-        "description": "Story-driven experiences with emergent narratives",
-        "cats": ["Cat:Thematic", "Adventure", "Fantasy"],
+        "description": "Narrative-forward quests with progression",
+        "cats": ["Cat:Thematic", "Cat:Adventure"],
         "mechs_on": ["Dice Rolling", "Tile Placement", "Variable Player Powers"],
-        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4, 
-        "play_time": 90, "min_age": 12, "weight": 2.7,
-        "market_insight": "Adventure games with campaign modes see 3x higher engagement"
+        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
+        "play_time": 90, "min_age": 12, "weight": 2.8,
+        "market_insight": "Story, progression, and 60–120 minute sessions are typical."
     },
     "♟️ Abstract Strategy": {
-        "description": "Pure strategic gameplay with minimal luck",
+        "description": "Low-luck, perfect-information duels",
         "cats": ["Cat:Abstract"],
         "mechs_on": ["Grid Movement", "Pattern Building", "Area Majority / Influence"],
-        "year": CURRENT_YEAR, "min_players": 2, "max_players": 2, 
-        "play_time": 20, "min_age": 10, "weight": 2.0,
-        "market_insight": "2-player abstracts under 30 minutes are experiencing a renaissance"
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 2,
+        "play_time": 25, "min_age": 10, "weight": 2.1,
+        "market_insight": "2-player, sub-30 minutes, tight tactical clarity."
     },
     "🃏 Deck Builder": {
-        "description": "Card-driven engine building with high replayability",
-        "cats": ["Cat:CGS"],
+        "description": "Card engines with incremental upgrades",
+        "cats": ["Cat:Card Game", "Cat:Strategy"],
         "mechs_on": ["Deck Construction", "Hand Management", "Set Collection"],
-        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4, 
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 45, "min_age": 10, "weight": 2.3,
-        "market_insight": "Deck builders with asymmetric starting decks rate 0.5 points higher"
+        "market_insight": "2–4 players, 30–60 minutes, smooth upgrade cadence."
     },
     "🎭 Social Deduction": {
-        "description": "Hidden role games focused on deduction and bluffing",
+        "description": "Hidden teams, reads and bluffs",
         "cats": ["Cat:Party"],
         "mechs_on": ["Hidden Roles", "Voting", "Player Elimination"],
-        "year": CURRENT_YEAR, "min_players": 5, "max_players": 10, 
-        "play_time": 20, "min_age": 10, "weight": 1.7,
-        "market_insight": "Social deduction without player elimination sees 60% more positive reviews"
+        "year": CURRENT_YEAR, "min_players": 6, "max_players": 10,
+        "play_time": 20, "min_age": 10, "weight": 1.6,
+        "market_insight": "Larger tables, fast rounds, and role uncertainty define the genre."
     },
+    "📝 Roll & Write": {
+        "description": "Combo puzzles on a sheet, low upkeep",
+        "cats": ["Cat:Family", "Cat:Dice"],
+        "mechs_on": ["Dice Rolling", "Pattern Building", "Set Collection"],
+        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
+        "play_time": 25, "min_age": 8, "weight": 1.5,
+        "market_insight": "1–4 players, sub-30 minutes, satisfying combo spikes."
+    },
+    "🧩 Tile-Layer Euro": {
+        "description": "Spatial drafting with gentle engine scoring",
+        "cats": ["Cat:Strategy", "Cat:City Building"],
+        "mechs_on": ["Tile Placement", "Pattern Building", "Set Collection"],
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
+        "play_time": 60, "min_age": 10, "weight": 2.3,
+        "market_insight": "2–4 players, 45–75 minutes, spatial scoring is the norm."
+    }
 }
 
 @st.cache_resource(show_spinner=False)
@@ -2463,6 +2480,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
