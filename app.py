@@ -923,6 +923,7 @@ with tab_intel:
     opportunities = sorted(cluster_insights.items(), key=lambda x: x[1]["opportunity_score"], reverse=True)[:5]
     
     # ---- Dual-axis grouped bars: Opportunity (%) vs Avg Rating (0–10) ----
+    
     def wrap_label(s: str, max_chars_per_line: int = 18, max_lines: int = 3) -> str:
         """Word-wrap a label with <br> and optionally truncate with ellipsis if too long."""
         words = s.split()
@@ -992,7 +993,7 @@ with tab_intel:
     
     st.plotly_chart(fig_opp_bar, use_container_width=True)
     # -------------------------------------------------------------------
-    # -------------------------------------------------------------------
+
     opp_cols = st.columns(len(opportunities))
     for i, (cluster_id, data) in enumerate(opportunities):
         with opp_cols[i]:
@@ -2335,6 +2336,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
