@@ -923,75 +923,73 @@ with tab_intel:
     opportunities = sorted(cluster_insights.items(), key=lambda x: x[1]["opportunity_score"], reverse=True)[:5]
     
     # ---- Dual-axis grouped bars: Opportunity (%) vs Avg Rating (0–10) ----
-    
     def wrap_label(s: str, max_chars_per_line: int = 18, max_lines: int = 3) -> str:
-        """Word-wrap a label with <br> and optionally truncate with ellipsis if too long."""
-        words = s.split()
-        lines, cur = [], ""
+        words, lines, cur = s.split(), [], ""
         for w in words:
             if len(cur) + len(w) + (1 if cur else 0) <= max_chars_per_line:
                 cur = f"{cur} {w}".strip()
             else:
-                lines.append(cur)
-                cur = w
-                if len(lines) == max_lines - 1:
-                    break
-        if cur:
-            lines.append(cur)
-        # If there are leftover words, add ellipsis
+                lines.append(cur); cur = w
+                if len(lines) == max_lines - 1: break
+        if cur: lines.append(cur)
         used_words = " ".join(lines).split()
-        if len(used_words) < len(words):
-            if len(lines) >= max_lines:
-                lines[-1] = (lines[-1] + "…").rstrip()
+        if len(used_words) < len(words) and len(lines) >= max_lines:
+            lines[-1] = (lines[-1] + "…").rstrip()
         return "<br>".join(lines)
     
     opp_labels_raw = [cluster_labels.get(cid, f"Segment {cid}") for cid, _ in opportunities]
-    opp_labels_wrapped = [wrap_label(lbl, max_chars_per_line=18, max_lines=3) for lbl in opp_labels_raw]
-    opp_scores = [data["opportunity_score"] for _, data in opportunities]               # 0–100
-    opp_avg_ratings = [cluster_insights[cid]["avg_rating"] for cid, _ in opportunities] # 0–10
+    opp_labels_wrapped = [wrap_label(lbl, 18, 3) for lbl in opp_labels_raw]
+    opp_scores = [data["opportunity_score"] for _, data in opportunities]                # 0–100
+    opp_avg_ratings = [cluster_insights[cid]["avg_rating"] for cid, _ in opportunities]  # 0–10
+    opp_avg_ratings_scaled = [v * 10 for v in opp_avg_ratings]                           # scale to 0–100
     
-    fig_opp_bar = make_subplots(specs=[[{"secondary_y": True}]])
+    fig_opp_bar = go.Figure()
     
-    # Left axis: Opportunity %
-    fig_opp_bar.add_trace(
-        go.Bar(
-            x=opp_labels_wrapped,
-            y=opp_scores,
-            name="Opportunity (%)",
-            marker_color=SUCCESS_COLOR,
-            opacity=0.9
-        ),
-        secondary_y=False
-    )
+    # Left axis bars: Opportunity %
+    fig_opp_bar.add_trace(go.Bar(
+        x=opp_labels_wrapped,
+        y=opp_scores,
+        name="Opportunity (%)",
+        marker_color=SUCCESS_COLOR,
+        opacity=0.9
+    ))
     
-    # Right axis: Avg Rating (0–10)
-    fig_opp_bar.add_trace(
-        go.Bar(
-            x=opp_labels_wrapped,
-            y=opp_avg_ratings,
-            name="Avg Rating (0–10)",
-            marker_color=CHART_COLORS[1],
-            opacity=0.8
-        ),
-        secondary_y=True
-    )
+    # Left axis bars (scaled): Avg Rating ×10 so bars group side-by-side
+    fig_opp_bar.add_trace(go.Bar(
+        x=opp_labels_wrapped,
+        y=opp_avg_ratings_scaled,
+        name="Avg Rating (0–10)",
+        marker_color=CHART_COLORS[1],
+        opacity=0.85
+    ))
     
-    fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100], secondary_y=False)
-    fig_opp_bar.update_yaxes(title_text="Avg Rating (0–10)", range=[0, 10], secondary_y=True)
-    fig_opp_bar.update_xaxes(title_text="", tickangle=0)
+    # Left axis (0–100)
+    fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100])
     
+    # Add a right axis that overlays the left, showing 0–10
     fig_opp_bar.update_layout(
-        height=380,
-        barmode="group",                 # <— grouped (separate) bars, NOT stacked
+        yaxis2=dict(
+            title="Avg Rating (0–10)",
+            overlaying="y",
+            side="right",
+            range=[0, 10],
+            tickmode="linear",
+            dtick=1
+        ),
+        barmode="group",          # <-- grouped (separate) bars
         bargap=0.25,
+        bargroupgap=0.05,
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         font_color=MUTED,
         legend_title_text="",
-        margin=dict(t=30, b=60, l=10, r=10),  # extra bottom for multi-line ticks
+        margin=dict(t=30, b=60, l=10, r=40)
     )
     
+    fig_opp_bar.update_xaxes(title_text="", tickangle=0)
+    
     st.plotly_chart(fig_opp_bar, use_container_width=True)
+    # -------------------------------------------------------------------
     # -------------------------------------------------------------------
 
     opp_cols = st.columns(len(opportunities))
@@ -2336,6 +2334,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
