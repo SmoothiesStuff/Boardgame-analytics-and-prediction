@@ -904,9 +904,6 @@ with col6:
     st.metric("Success Rate", f"{success_rate:.1f}%")
     st.caption("Games rated ≥7.0")
     st.markdown('</div>', unsafe_allow_html=True)
-narr(f"""
-**Quick read of the market.** At a glance the median rating is {median_rating:.2f}. That lines up with a larger pattern from my dashboard work. Low complexity games under 2.0 are usually not great. Quality starts to appear around 2.5 and keeps climbing as games get deeper. The surprise is that very simple games can still shine when the design is clean and intentional. If you want consistent quality, aim for thoughtful depth rather than a pile of rules. Families do not hate depth. They hate clutter.
-""")
 
 # Enhanced tabs with more analysis
 tab_intel, tab_wizard, tab_trends, tab_segments, tab_synergies = st.tabs([
@@ -924,7 +921,53 @@ with tab_intel:
     # Market opportunity analysis
     st.markdown("### 🏆 Top Market Opportunities")
     opportunities = sorted(cluster_insights.items(), key=lambda x: x[1]["opportunity_score"], reverse=True)[:5]
+    # ---- Dual-axis bar chart: Opportunity (%) vs Avg Rating (0–10) ----
+    opp_labels = [cluster_labels.get(cid, f"Segment {cid}") for cid, _ in opportunities]
+    opp_scores = [data["opportunity_score"] for _, data in opportunities]          # 0–100
+    opp_avg_ratings = [cluster_insights[cid]["avg_rating"] for cid, _ in opportunities]  # 0–10
     
+    fig_opp_bar = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # Left axis (primary): Opportunity %
+    fig_opp_bar.add_trace(
+        go.Bar(
+            x=opp_labels,
+            y=opp_scores,
+            name="Opportunity Score (%)",
+            marker_color=SUCCESS_COLOR,
+            opacity=0.85
+        ),
+        secondary_y=False
+    )
+    
+    # Right axis (secondary): Avg Rating 0–10
+    fig_opp_bar.add_trace(
+        go.Bar(
+            x=opp_labels,
+            y=opp_avg_ratings,
+            name="Avg Rating (0–10)",
+            marker_color=CHART_COLORS[1],
+            opacity=0.75
+        ),
+        secondary_y=True
+    )
+    
+    fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100], secondary_y=False)
+    fig_opp_bar.update_yaxes(title_text="Avg Rating (0–10)", range=[0, 10], secondary_y=True)
+    fig_opp_bar.update_xaxes(title_text="Top Segments", tickangle=-15)
+    
+    fig_opp_bar.update_layout(
+        height=360,
+        barmode="group",                      # group the two bars per segment
+        plot_bgcolor=CHART_BG,
+        paper_bgcolor=CHART_BG,
+        font_color=MUTED,
+        legend_title_text="",
+        margin=dict(t=30, b=30, l=10, r=10)
+    )
+    
+    st.plotly_chart(fig_opp_bar, use_container_width=True)
+    # -------------------------------------------------------------------
     opp_cols = st.columns(len(opportunities))
     for i, (cluster_id, data) in enumerate(opportunities):
         with opp_cols[i]:
@@ -2267,6 +2310,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
