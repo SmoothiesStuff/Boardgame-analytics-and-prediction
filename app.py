@@ -813,20 +813,8 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.sidebar.title("🎮 Control Panel")
 st.sidebar.markdown("---")
 
-uploaded = st.sidebar.file_uploader("📁 Upload dataset (CSV/Parquet)", type=["csv", "parquet"])
-df = load_df(uploaded)
-
-# Add data quality metrics
-data_quality = {
-    "Total Games": len(df),
-    "Features": len(df.columns),
-    "Years Covered": f"{df['Year Published'].min()}-{df['Year Published'].max()}",
-    "Avg Completeness": f"{(1 - df.isnull().mean().mean())*100:.1f}%"
-}
-
-with st.sidebar.expander("📊 Data Quality Metrics", expanded=False):
-    for metric, value in data_quality.items():
-        st.metric(metric, value)
+# Always load from the default dataset paths (no upload control)
+df = load_df(None)  # or just load_df() if you set a default arg
 
 # Advanced filtering controls
 st.sidebar.markdown("### 🎯 Analysis Parameters")
@@ -2481,6 +2469,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
