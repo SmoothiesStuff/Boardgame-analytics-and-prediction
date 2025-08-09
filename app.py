@@ -707,78 +707,79 @@ def create_success_predictor_chart(df: pd.DataFrame, x_col: str, y_col: str = "A
 
 # Profile presets with market-driven insights
 # Profile presets with market-aligned defaults (3×3 grid)
+# Profile presets with grounded, analytics-style insights (3×3 grid)
 PROFILE_PRESETS = {
     "🎉 Family Party Game": {
-        "description": "Accessible, social games for casual tables",
+        "description": "Light rules, high turn cadence",
         "cats": ["Cat:Family", "Cat:Party"],
         "mechs_on": ["Set Collection", "Dice Rolling"],
         "year": CURRENT_YEAR, "min_players": 3, "max_players": 8,
         "play_time": 30, "min_age": 8, "weight": 1.7,
-        "market_insight": "20–40 minutes with fast turns and readable components tends to rate best; delight beats depth here."
+        "market_insight": "Common profile is 20–40 min at ~1.6–2.0 weight and ≥6 players. Ratings fall off past ~45 min; optimize teach time and turn speed."
     },
     "🤝 Cooperative Strategy": {
-        "description": "Team vs game with clear roles and powers",
+        "description": "Team vs game with role clarity",
         "cats": ["Cat:Thematic", "Cat:Strategy"],
         "mechs_on": ["Cooperative Game", "Variable Player Powers", "Action Points"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 60, "min_age": 12, "weight": 2.6,
-        "market_insight": "1–4 players with solo support and distinct roles sustain engagement; difficulty tuning matters more than length."
+        "market_insight": "1–4 players, ~2.3–2.8 weight, 45–90 min. Solo support increases reachable audience. Difficulty curves matter more than duration."
     },
     "🏛️ Heavy Euro Game": {
-        "description": "Deep economic engines and tight efficiency puzzles",
+        "description": "Tight economies, scarce actions",
         "cats": ["Cat:Strategy", "Economic"],
         "mechs_on": ["Worker Placement", "Market", "Network and Route Building"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 120, "min_age": 14, "weight": 3.6,
-        "market_insight": "90–150 minutes, scarce actions, and visible trade-offs correlate with higher ratings; minimize upkeep between turns."
+        "market_insight": "Typical lane is 90–150 min at 3.3–3.9 weight. Ratings track visible trade-offs per turn and low upkeep, not rule count."
     },
     "⚔️ Thematic Adventure": {
-        "description": "Narrative-forward quests with progression",
+        "description": "Progression with bounded upkeep",
         "cats": ["Cat:Thematic", "Cat:Adventure"],
         "mechs_on": ["Dice Rolling", "Tile Placement", "Variable Player Powers"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 90, "min_age": 12, "weight": 2.8,
-        "market_insight": "Progression and optional solo widen the funnel; 60–120 minutes is the common landing zone."
+        "market_insight": "1–4 players, 60–120 min, ~2.5–3.0 weight. Progression helps, but bookkeeping is the failure mode; cap it per turn."
     },
     "♟️ Abstract Strategy": {
-        "description": "Low-luck, perfect-information duels",
+        "description": "Low luck, perfect information",
         "cats": ["Cat:Abstract"],
         "mechs_on": ["Grid Movement", "Pattern Building", "Area Majority / Influence"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 2,
         "play_time": 25, "min_age": 10, "weight": 2.1,
-        "market_insight": "2-player, sub-30 minutes, and clean rules density drive reception; clarity per minute beats complexity."
+        "market_insight": "2-player, 15–30 min, ~1.8–2.3 weight. Elegance is the lever: compress rules, increase move quality, minimize draw steps."
     },
     "🃏 Deck Builder": {
-        "description": "Card engines with incremental upgrades",
+        "description": "Lean starts, steady upgrades",
         "cats": ["Cat:Card Game", "Cat:Strategy"],
         "mechs_on": ["Deck Construction", "Hand Management", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 45, "min_age": 10, "weight": 2.3,
-        "market_insight": "2–4 players at 30–60 minutes feels most common; thin starts and steady upgrade tempo keep ratings up."
+        "market_insight": "2–4 players at 30–60 min, ~2.0–2.6 weight. Early turns must be fast; thin starting decks keep tempo and ratings up."
     },
     "🎭 Social Deduction": {
-        "description": "Hidden teams, reads and bluffs",
+        "description": "Hidden teams, high interaction",
         "cats": ["Cat:Party"],
         "mechs_on": ["Hidden Roles", "Voting", "Player Elimination"],
         "year": CURRENT_YEAR, "min_players": 6, "max_players": 10,
         "play_time": 20, "min_age": 10, "weight": 1.6,
-        "market_insight": "Larger tables and short rounds land best; limiting hard elimination improves sentiment."
+        "market_insight": "6–10 players, 15–30 min, ~1.5–1.8 weight. Limit hard elimination and keep round cadence tight; information flow drives reception."
     },
     "📝 Roll & Write": {
-        "description": "Combo puzzles on a sheet, low upkeep",
+        "description": "Low setup, visible combos",
         "cats": ["Cat:Family", "Cat:Dice"],
         "mechs_on": ["Dice Rolling", "Pattern Building", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 25, "min_age": 8, "weight": 1.5,
-        "market_insight": "1–4 players, 20–30 minutes, quick setup and satisfying chains are the winning pattern."
+        "market_insight": "1–4 players, 20–30 min, ~1.3–1.7 weight. Variability should come from sheets, not extra rules; minimize idle time."
     },
     "🧩 Tile-Layer Euro": {
-        "description": "Spatial drafting with gentle engine scoring",
+        "description": "Spatial scoring, constrained drafting",
         "cats": ["Cat:Strategy", "Cat:City Building"],
         "mechs_on": ["Tile Placement", "Pattern Building", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 60, "min_age": 10, "weight": 2.3,
-        "market_insight": "2–4 players at 45–75 minutes with visible spatial scoring remains a reliable midweight lane."
+        "market_insight": "2–4 players, 45–75 min, ~2.0–2.5 weight. Make scoring visible and cuts obvious; drafting beats bookkeeping for pace."
     }
 }
 
@@ -2480,6 +2481,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
