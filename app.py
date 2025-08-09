@@ -78,6 +78,8 @@ MODEL_PATHS = {
     "sales_xgb": "models/sales_xgb.joblib",
 }
 INPUT_SCALER_PATH = "models/input_scaler.joblib"
+# Columns that are engineered for the app and should never be fed to the model
+PRED_EXCLUDE = {"Cluster", "PCA1", "PCA2", "LogOwned", "SalesPercentile", "__dist"}
 
 CURRENT_YEAR = 2025
 
@@ -238,7 +240,6 @@ def predict_with_models(models: Dict, X_input_profile: Dict) -> Dict[str, float 
         return {k: None for k in models.keys() if not k.startswith("_")}
 
     # Build 1xN input matching training columns
-    PRED_EXCLUDE = {"Cluster","PCA1","PCA2","LogOwned","SalesPercentile","__dist"}
     Xvec = build_vector_for_columns(training_cols, X_input_profile)
 
     # If we have a separate scaler (i.e., models are not Pipelines), transform now
@@ -1392,6 +1393,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
