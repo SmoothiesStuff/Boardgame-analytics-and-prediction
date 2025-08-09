@@ -112,6 +112,125 @@ def split_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     meta = df[keep_cols].copy()
     return X, meta
 
+# ==== Input alignment & logging helpers =======================================
+# These make sure the UI profile aligns 1:1 with the model's training columns,
+# guards one-hots, clamps to training range, and prints/saves the exact vector
+# fed into the model for debugging/review.
+
+# Columns you NEVER want to feed to the predictor (engineered for the app only)
+PRED_EXCLUDE = set(PRED_EXCLUDE)  # simplest
+
+# One-hot families (prefixes) to sanity-check
+ONEHOT_PREFIXES = ["Cat:", "Mechanic_", "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"]
+
+# Numeric columns commonly present in BGG-style features (extend if you have more)
+NUMERIC_COLS = [
+    "Year Published","Min Players","Max Players","Play Time","Min Age",
+    "GameWeight","Kickstarted","BestPlayers","Rating Average","Complexity Average"
+]
+
+def _coerce_types(profile: dict, numeric_cols: list[str]) -> dict:
+    out = {}
+    for k, v in profile.items():
+        if isinstance(v, str) and k in numeric_cols:
+            v = v.replace(",", ".")  # handle decimal commas
+        if k in numeric_cols:
+            try:
+                out[k] = float(v)
+            except Exception:
+                out[k] = 0.0
+        else:
+            out[k] = v
+    return out
+
+def _fix_consistency(p: dict) -> dict:
+    # keep min/max players coherent
+    if "Min Players" in p and "Max Players" in p and p["Min Players"] > p["Max Players"]:
+        p["Max Players"] = p["Min Players"]
+    # keep playtime roughly sane if you have community mins/max in your set
+    if "ComMinPlaytime" in p and "ComMaxPlaytime" in p and p["ComMinPlaytime"] > p["ComMaxPlaytime"]:
+        p["ComMaxPlaytime"] = p["ComMinPlaytime"]
+    return p
+
+def _ensure_onehots(x_df: pd.DataFrame, training_cols: list[str]) -> None:
+    """If all zeros within a one-hot group, flip the first feature in that group to 1 as a neutral default."""
+    for pref in ONEHOT_PREFIXES:
+        group = [c for c in training_cols if c.startswith(pref)]
+        if not group:
+            continue
+        if (x_df[group].sum(axis=1).iloc[0] == 0):
+            x_df.at[x_df.index[0], group[0]] = 1.0
+
+def _clamp_with_scaler(x_df: pd.DataFrame, scaler, training_cols: list[str]) -> None:
+    """Clamp numeric inputs to the scaler's observed training range (keeps things in-distribution)."""
+    num_cols = [c for c in training_cols if c in NUMERIC_COLS]
+    if not num_cols or scaler is None:
+        return
+    idx = [training_cols.index(c) for c in num_cols]
+    arr = x_df[training_cols].astype(float).values
+    if hasattr(scaler, "data_min_"):   # MinMaxScaler-like
+        lo = scaler.data_min_[idx]; hi = scaler.data_max_[idx]
+    elif hasattr(scaler, "mean_") and hasattr(scaler, "scale_"):  # StandardScaler-like
+        lo = scaler.mean_[idx] - 4 * scaler.scale_[idx]
+        hi = scaler.mean_[idx] + 4 * scaler.scale_[idx]
+    else:
+        return
+    arr[:, idx] = np.clip(arr[:, idx], lo, hi)
+    x_df[training_cols] = arr
+
+def align_profile_to_training(profile: dict, training_cols: list[str], scaler=None) -> pd.DataFrame:
+    """Return a single-row DataFrame exactly matching training_cols (minus PRED_EXCLUDE)."""
+    training_cols = [c for c in training_cols if c not in PRED_EXCLUDE]
+    clean = _coerce_types(profile, NUMERIC_COLS)
+    clean = _fix_consistency(clean)
+    # fill missing with 0
+    row = {c: 0.0 for c in training_cols}
+    row.update({k: clean.get(k, row.get(k, 0.0)) for k in training_cols})
+    X = pd.DataFrame([row], columns=training_cols)
+    _ensure_onehots(X, training_cols)
+    _clamp_with_scaler(X, scaler, training_cols)
+    # ensure numeric dtype
+    for c in X.columns:
+        X[c] = pd.to_numeric(X[c], errors="coerce").fillna(0.0)
+    return X
+
+def sanity_report(x_df: pd.DataFrame) -> list[str]:
+    """Lightweight guardrails to surface suspicious inputs in the UI log."""
+    msgs = []
+    def within(name, lo, hi):
+        if name in x_df.columns:
+            v = float(x_df.iloc[0][name])
+            if not (lo <= v <= hi):
+                msgs.append(f"{name}={v} looks unusual (expected {lo}–{hi}).")
+    within("Min Age", 6, 21)
+    within("Play Time", 10, 600)
+    within("GameWeight", 1.0, 4.9)
+    within("Min Players", 1, 12)
+    within("Max Players", 1, 20)
+    return msgs
+
+def log_vector(tag: str, X: pd.DataFrame, save_csv_path: str = "last_inference_vector.csv"):
+    """Print and optionally save the exact vector fed into the model (columns + values)."""
+    print(f"\n=== {tag}: vector fed into model ===")
+    print("shape:", X.shape)
+    print("columns:", list(X.columns))
+    print("values:", X.iloc[0].to_dict())
+    try:
+        X.to_csv(save_csv_path, index=False)
+        print(f"Saved to: {save_csv_path}")
+    except Exception:
+        pass
+    # Streamlit preview (non-fatal if st not available at import time)
+    try:
+        import streamlit as st  # already imported in this app
+        with st.expander(f"{tag} – fed vector preview", expanded=False):
+            st.write("shape:", X.shape)
+            st.dataframe(X)
+            st.caption(f"Saved CSV → {save_csv_path}")
+    except Exception:
+        pass
+# ==============================================================================
+
 @st.cache_resource(show_spinner=False)
 def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
     # scale first
@@ -225,45 +344,50 @@ def _align_features(model, X_input_df: pd.DataFrame) -> pd.DataFrame:
         return X_input_df.reindex(columns=cols, fill_value=0)
     return X_input_df
 
+
+
 def predict_with_models(models: Dict, X_input_profile: Dict) -> Dict[str, float | None]:
     """
-    X_input_profile is your dict of feature values (from the Wizard).
-    We will build the exact feature vector each model/scaler expects.
+    Build the exact feature vector each model/scaler expects, sanity-check it,
+    log/CSV the fed vector, then predict.
     """
     out = {}
     scaler_obj = models.get("_input_scaler", None)
 
-    # Get the canonical training columns (prefer scaler's)
+    # 1) Determine canonical training columns
     training_cols = get_training_feature_names(models)
     if not training_cols:
         st.error("Models lack feature_names_in_. Re-save models with feature names or provide a column list.")
         return {k: None for k in models.keys() if not k.startswith("_")}
 
-    # Build 1xN input matching training columns
-    Xvec = build_vector_for_columns(training_cols, X_input_profile)
+    # 2) Build & align the vector (coercion, defaults, one-hot guards, clamping)
+    Xvec = build_vector_for_columns(training_cols, X_input_profile, scaler=scaler_obj)
 
-    # If we have a separate scaler (i.e., models are not Pipelines), transform now
-    Xvec_scaled = None
+    # 3) Sanity messages
+    for w in sanity_report(Xvec):
+        st.warning(w)
+
+    # 4) Optional *additional* transform if your models are not Pipelines and you still need scaling
+    Xvec_scaled = Xvec.copy()
     if scaler_obj is not None and not hasattr(scaler_obj, "named_steps"):
         try:
             Xvec_scaled = pd.DataFrame(scaler_obj.transform(Xvec), columns=Xvec.columns)
         except Exception as e:
             st.error(f"Scaler transform failed: {e}")
             Xvec_scaled = Xvec.copy()
-    else:
-        Xvec_scaled = Xvec.copy()
 
-    # Predict per model (reindex in case each model uses a subset)
+    # 5) Log the final fed vector (post-scaling if applied) and save CSV for review
+    log_vector("Inference", Xvec_scaled, save_csv_path="last_inference_vector.csv")
+
+    # 6) Predict per model (reindex if model trained on a subset)
     for key, model in models.items():
         if key.startswith("_"):
             continue
         try:
+            Xm = Xvec_scaled
             if hasattr(model, "feature_names_in_") and model.feature_names_in_ is not None:
                 cols = list(model.feature_names_in_)
                 Xm = Xvec_scaled.reindex(columns=cols, fill_value=0.0)
-            else:
-                Xm = Xvec_scaled
-
             pred = model.predict(Xm)
             out[key] = float(pred[0])
         except Exception as e:
@@ -271,6 +395,7 @@ def predict_with_models(models: Dict, X_input_profile: Dict) -> Dict[str, float 
             out[key] = None
 
     return out
+
 
 
 def get_training_feature_names(models: Dict) -> list[str]:
@@ -293,23 +418,11 @@ def get_training_feature_names(models: Dict) -> list[str]:
             seen.add(c); out.append(c)
     return out
 
-def build_vector_for_columns(target_cols: list[str], profile: Dict) -> pd.DataFrame:
+def build_vector_for_columns(target_cols: list[str], profile: Dict, scaler=None) -> pd.DataFrame:
     """
-    Create a 1-row DataFrame with EXACTLY target_cols.
-    Unspecified features default to 0.
+    Create a 1-row DataFrame with EXACTLY target_cols using the robust aligner.
     """
-    # strip any app-engineered columns that don't belong in training
-    target_cols = [c for c in target_cols if c not in PRED_EXCLUDE]
-    base = {c: 0 for c in target_cols}
-    for k, v in profile.items():
-        if k in base:
-            base[k] = v
-    df = pd.DataFrame([base])[target_cols]
-    # coerce to numeric
-    for c in df.columns:
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
-    return df
-
+    return align_profile_to_training(profile, target_cols, scaler=scaler)
 # Visualization functions
 def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
     fig = go.Figure()
@@ -1393,6 +1506,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
