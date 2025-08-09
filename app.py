@@ -26,7 +26,12 @@ st.set_page_config(page_title="Board Game Developer Console", page_icon="🎲", 
 PALETTE = [
     "#8B7355", "#A67C52", "#7C8C4A", "#C4A484", "#4F4538",
     "#B56576", "#6B705C", "#D4A373", "#8D6B94", "#9C8B7A",
-    "#6B5B73", "#8A7968", "#A68B5B", "#7A8B8B", "#8B7D6B"
+    "#2E8B57", "#CD853F", "#8B4513", "#6B8E23", "#5F9EA0",
+    "#BC8F8F", "#4682B4", "#D2691E", "#708090", "#F4A460"
+]
+CHART_COLORS = [
+    "#2E8B57", "#CD853F", "#5F9EA0", "#BC8F8F", "#4682B4",
+    "#8B4513", "#6B8E23", "#D2691E", "#708090", "#F4A460"
 ]
 ACCENT = "#A67C52"
 MUTED = "#6B705C" 
@@ -192,7 +197,7 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
         x=df_filtered["GameWeight"],
         y=df_filtered["BayesAvgRating"], 
         mode='markers',
-        marker=dict(size=6, color=MUTED, opacity=0.6),
+        marker=dict(size=6, color=CHART_COLORS[0], opacity=0.6),
         text=df_filtered["Name"],
         hovertemplate="<b>%{text}</b><br>Complexity: %{x:.1f}<br>Rating: %{y:.2f}<extra></extra>",
         name="All Games",
@@ -205,7 +210,7 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
             x=highlight_neighbors["GameWeight"],
             y=highlight_neighbors["BayesAvgRating"],
             mode='markers',
-            marker=dict(size=10, color=ACCENT, opacity=0.9, line=dict(width=2, color='white')),
+            marker=dict(size=10, color=CHART_COLORS[1], opacity=0.9, line=dict(width=2, color='white')),
             text=highlight_neighbors["Name"],
             hovertemplate="<b>%{text}</b><br>Complexity: %{x:.1f}<br>Rating: %{y:.2f}<extra></extra>",
             name="Similar Games",
@@ -213,9 +218,9 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
         ))
     
     fig.update_layout(
-        title="Game Complexity vs Rating",
-        xaxis_title="Complexity (GameWeight)",
-        yaxis_title="Bayes Average Rating",
+        title="Game Complexity vs Player Rating",
+        xaxis_title="Complexity (1=Simple, 5=Very Complex)",
+        yaxis_title="Average Player Rating",
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         height=400,
@@ -232,7 +237,7 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
         x=df_filtered["Year Published"],
         y=df_filtered["BayesAvgRating"],
         mode='markers',
-        marker=dict(size=6, color=MUTED, opacity=0.6),
+        marker=dict(size=6, color=CHART_COLORS[2], opacity=0.6),
         text=df_filtered["Name"],
         hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>",
         name="All Games",
@@ -245,7 +250,7 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
             x=highlight_neighbors["Year Published"],
             y=highlight_neighbors["BayesAvgRating"],
             mode='markers',
-            marker=dict(size=10, color=ACCENT, opacity=0.9, line=dict(width=2, color='white')),
+            marker=dict(size=10, color=CHART_COLORS[3], opacity=0.9, line=dict(width=2, color='white')),
             text=highlight_neighbors["Name"],
             hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>",
             name="Similar Games",
@@ -253,9 +258,9 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
         ))
     
     fig.update_layout(
-        title="Publication Year vs Rating",
+        title="Publication Year vs Player Rating",
         xaxis_title="Year Published",
-        yaxis_title="Bayes Average Rating",
+        yaxis_title="Average Player Rating",
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         height=400,
@@ -264,50 +269,75 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
     return fig
 
 def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
-    """Create year vs rating bubble chart with complexity as size"""
+    """Create year vs rating bubble chart with one bubble per year (aggregated)"""
+    # Aggregate by year - one bubble per year
+    yearly_agg = df_filtered.groupby("Year Published").agg({
+        "BayesAvgRating": "mean",
+        "GameWeight": "mean", 
+        "Owned Users": "mean",
+        "Name": "count"
+    }).reset_index()
+    yearly_agg.rename(columns={"Name": "Game Count"}, inplace=True)
+    
     fig = go.Figure()
     
-    # Main data points
+    # Main data points - one per year
     fig.add_trace(go.Scatter(
-        x=df_filtered["Year Published"],
-        y=df_filtered["BayesAvgRating"],
+        x=yearly_agg["Year Published"],
+        y=yearly_agg["BayesAvgRating"],
         mode='markers',
         marker=dict(
-            size=df_filtered["GameWeight"] * 8 + 5,  # Scale complexity for visibility
-            color=MUTED,
-            opacity=0.5,
-            line=dict(width=1, color='white')
+            size=yearly_agg["GameWeight"] * 8 + 10,  # Scale complexity for visibility
+            color=yearly_agg["Game Count"],
+            colorscale="Viridis",
+            opacity=0.8,
+            line=dict(width=2, color='white'),
+            colorbar=dict(title="Games Released", x=1.02)
         ),
-        text=df_filtered["Name"],
-        customdata=df_filtered["GameWeight"],
-        hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<br>Complexity: %{customdata:.1f}<extra></extra>",
-        name="All Games",
+        text=yearly_agg["Year Published"],
+        customdata=np.column_stack((yearly_agg["GameWeight"], yearly_agg["Game Count"], yearly_agg["Owned Users"])),
+        hovertemplate="<b>Year %{text}</b><br>" +
+                      "Average Rating: %{y:.2f}<br>" +
+                      "Average Complexity: %{customdata[0]:.1f}<br>" +
+                      "Games Released: %{customdata[1]}<br>" +
+                      "Average Owners: %{customdata[2]:,.0f}<extra></extra>",
+        name="Yearly Averages",
         showlegend=True
     ))
     
-    # Highlight neighbors if provided
+    # Highlight specific years if neighbors provided
     if highlight_neighbors is not None and len(highlight_neighbors) > 0:
+        neighbor_years = highlight_neighbors.groupby("Year Published").agg({
+            "BayesAvgRating": "mean",
+            "GameWeight": "mean",
+            "Name": "count"
+        }).reset_index()
+        neighbor_years.rename(columns={"Name": "Game Count"}, inplace=True)
+        
         fig.add_trace(go.Scatter(
-            x=highlight_neighbors["Year Published"],
-            y=highlight_neighbors["BayesAvgRating"],
+            x=neighbor_years["Year Published"],
+            y=neighbor_years["BayesAvgRating"],
             mode='markers',
             marker=dict(
-                size=highlight_neighbors["GameWeight"] * 8 + 10,
+                size=neighbor_years["GameWeight"] * 8 + 15,
                 color=ACCENT,
                 opacity=0.9,
-                line=dict(width=2, color='white')
+                line=dict(width=3, color='white')
             ),
-            text=highlight_neighbors["Name"],
-            customdata=highlight_neighbors["GameWeight"],
-            hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<br>Complexity: %{customdata:.1f}<extra></extra>",
-            name="Similar Games",
+            text=neighbor_years["Year Published"],
+            customdata=np.column_stack((neighbor_years["GameWeight"], neighbor_years["Game Count"])),
+            hovertemplate="<b>Year %{text} (Similar Games)</b><br>" +
+                          "Average Rating: %{y:.2f}<br>" +
+                          "Average Complexity: %{customdata[0]:.1f}<br>" +
+                          "Similar Games: %{customdata[1]}<extra></extra>",
+            name="Similar Game Years",
             showlegend=True
         ))
     
     fig.update_layout(
-        title="Year vs Rating (Bubble Size = Complexity)",
+        title="Market Trends by Year (Bubble Size = Complexity, Color = Game Count)",
         xaxis_title="Year Published",
-        yaxis_title="Bayes Average Rating",
+        yaxis_title="Average Rating",
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         height=500,
@@ -391,6 +421,9 @@ df = load_df(uploaded)
 st.sidebar.markdown("---")
 year_col = "Year Published"
 min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
+# Limit historical range to 1900 minimum for slider
+display_min_year = max(1900, min_year)
+
 weight_col = "GameWeight"
 min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
 ptime_col = "Play Time"
@@ -400,7 +433,7 @@ k = st.sidebar.slider("Number of clusters", 2, 15, 8, step=1)
 topn = st.sidebar.slider("Nearest neighbors to show", 3, 30, 10, step=1)
 
 st.sidebar.subheader("Data Filters")
-yr_rng = st.sidebar.slider("Year range", min_year, max_year, (max(min_year, 2010), max_year))
+yr_rng = st.sidebar.slider("Year range", display_min_year, max_year, (1960, max_year))
 wt_rng = st.sidebar.slider("Complexity range", float(math.floor(min_w)), float(math.ceil(max_w)), (max(1.0, min_w), min(5.0, max_w)))
 pt_rng = st.sidebar.slider("Play time range (min)", min_t, max_t, (min_t, max_t))
 
@@ -471,35 +504,47 @@ with tab_dashboard:
         fig2 = create_year_vs_rating_chart(view_f)
         st.plotly_chart(fig2, use_container_width=True)
     
-    # Bubble chart spanning full width
-    st.markdown("### Combined Analysis: Year vs Rating vs Complexity")
-    fig3 = create_bubble_chart(view_f)
-    st.plotly_chart(fig3, use_container_width=True)
-    
-    # Market insights
-    st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
-    st.markdown("### 📊 Market Insights")
-    
-    # Calculate some insights
-    recent_games = view_f[view_f["Year Published"] >= 2020]
-    old_games = view_f[view_f["Year Published"] < 2010]
-    
-    insights_col1, insights_col2 = st.columns(2)
-    
-    with insights_col1:
-        st.markdown("**Quality Trends:**")
-        if len(recent_games) > 0 and len(old_games) > 0:
-            recent_avg = recent_games["BayesAvgRating"].mean()
-            old_avg = old_games["BayesAvgRating"].mean()
-            trend = "📈 Rising" if recent_avg > old_avg else "📉 Declining"
-            st.write(f"• Rating trend (2020+ vs pre-2010): {trend}")
-            st.write(f"• Recent average: {recent_avg:.2f}")
-            st.write(f"• Historical average: {old_avg:.2f}")
-    
-    with insights_col2:
-        st.markdown("**Complexity Trends:**")
-        if len(recent_games) > 0:
-            recent_complexity = recent_games["GameWeight"].mean()
+        # Combined Analysis: Year vs Rating vs Complexity
+        st.markdown("### 📈 Market Evolution Over Time")
+        st.markdown("*Each bubble represents one year. Bigger bubbles = higher complexity games that year.*")
+        fig3 = create_bubble_chart(view_f)
+        st.plotly_chart(fig3, use_container_width=True)
+        
+        # Market insights
+        st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
+        st.markdown("### 🔍 Key Market Insights")
+        
+        # Calculate insights with better explanations
+        recent_games = view_f[view_f["Year Published"] >= 2020]
+        old_games = view_f[view_f["Year Published"] < 2000]
+        
+        insights_col1, insights_col2 = st.columns(2)
+        
+        with insights_col1:
+            st.markdown("**📈 Quality Evolution:**")
+            if len(recent_games) > 0 and len(old_games) > 0:
+                recent_avg = recent_games["BayesAvgRating"].mean()
+                old_avg = old_games["BayesAvgRating"].mean()
+                trend = "📈 Improving" if recent_avg > old_avg else "📉 Declining"
+                st.write(f"• Player ratings trend: **{trend}**")
+                st.write(f"• Modern games (2020+): **{recent_avg:.2f}** avg rating")
+                st.write(f"• Classic games (pre-2000): **{old_avg:.2f}** avg rating")
+        
+        with insights_col2:
+            st.markdown("**🎯 Complexity Evolution:**")
+            if len(recent_games) > 0:
+                recent_complexity = recent_games["GameWeight"].mean()
+                overall_complexity = view_f["GameWeight"].mean()
+                st.write(f"• Modern complexity: **{recent_complexity:.1f}** (1-5 scale)")
+                st.write(f"• Historical average: **{overall_complexity:.1f}**")
+                if recent_complexity > overall_complexity + 0.2:
+                    st.write("• **Trend: Games getting more complex** 🧩")
+                elif recent_complexity < overall_complexity - 0.2:
+                    st.write("• **Trend: Games getting simpler** 🎯")
+                else:
+                    st.write("• **Trend: Complexity stable** ⚖️")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
             overall_complexity = view_f["GameWeight"].mean()
             st.write(f"• Recent games complexity: {recent_complexity:.2f}")
             st.write(f"• Overall average: {overall_complexity:.2f}")
@@ -805,138 +850,228 @@ with tab_wizard:
             )
 
 # ---------------------------------
-# Cluster Map Tab (Enhanced)
+# Cluster Map Tab (Enhanced & Simplified)
 # ---------------------------------
 with tab_map:
-    st.subheader("🗺️ Game Landscape Map")
-    st.markdown("Explore the board game design space through clustering and PCA visualization")
+    st.subheader("🗺️ Game Similarity Map")
+    st.markdown("**Each dot is a game. Similar games cluster together.** Games are positioned based on their mechanics, themes, and characteristics.")
     
     # Map controls
     map_col1, map_col2 = st.columns([3, 1])
     
     with map_col2:
-        color_by_opts = ["Cluster", "Year Published", "GameWeight", "BayesAvgRating"]
-        color_by = st.selectbox("Color points by:", color_by_opts, index=0)
+        st.markdown("**🎨 Display Options**")
+        color_by_opts = [
+            ("Cluster", "Game Type Groups"), 
+            ("Year Published", "Publication Year"),
+            ("GameWeight", "Complexity Level"), 
+            ("BayesAvgRating", "Player Rating")
+        ]
+        color_labels = {opt[0]: opt[1] for opt in color_by_opts}
+        color_by = st.selectbox("Color dots by:", [opt[0] for opt in color_by_opts], 
+                               format_func=lambda x: color_labels[x], index=0)
         
-        show_contours = st.checkbox("Show density contours", value=True)
-        point_size = st.slider("Point size", 4, 12, 8)
+        show_contours = st.checkbox("Show density areas", value=False, 
+                                   help="Shows where games cluster densely")
+        point_size = st.slider("Dot size", 4, 12, 7)
     
     with map_col1:
         hover_cols = ["Name", "Year Published", "BayesAvgRating", "Owned Users", "GameWeight", "Play Time"]
         hover_data = {col: True for col in hover_cols if col in view_f.columns}
 
+        # Use more colorful palette for the map
+        color_sequence = CHART_COLORS if color_by == "Cluster" else None
+
         fig_map = px.scatter(
             view_f, x="PCA1", y="PCA2", color=color_by,
-            color_discrete_sequence=PALETTE if color_by == "Cluster" else None,
+            color_discrete_sequence=color_sequence,
             hover_data=hover_data,
             height=600,
-            title=f"Game Design Space - Colored by {color_by}"
+            title=f"Board Game Landscape - Colored by {color_labels[color_by]}"
         )
         fig_map.update_traces(marker=dict(size=point_size, opacity=0.8))
         fig_map.update_layout(
             plot_bgcolor=CHART_BG,
             paper_bgcolor=CHART_BG,
-            font_color=MUTED
+            font_color=MUTED,
+            xaxis_title="← Simpler Mechanics ... More Complex Mechanics →",
+            yaxis_title="← Traditional Themes ... Modern Themes →"
         )
 
         # Add density contours if requested
         if show_contours and len(view_f) > 50:
             fig_contour = px.density_contour(view_f, x="PCA1", y="PCA2")
             for trace in fig_contour.data:
-                trace.update(opacity=0.3, line=dict(color=MUTED))
+                trace.update(opacity=0.3, line=dict(color=CHART_COLORS[0]))
                 fig_map.add_trace(trace)
 
         st.plotly_chart(fig_map, use_container_width=True)
+        
+        # Add explanation
+        st.markdown("""
+        **💡 How to read this map:**
+        - **Each dot = one board game**
+        - **Close dots = similar games** (mechanics, themes, complexity)
+        - **Distant dots = very different games**
+        - **Clusters = natural game categories** discovered by AI
+        """)
 
-    # Cluster statistics
-    st.markdown("### 📈 Cluster Performance Overview")
+    # Simplified cluster statistics
+    st.markdown("### 📊 Game Type Overview")
+    st.markdown("*Each cluster represents a natural grouping of similar games*")
     
     cluster_stats = []
     for cluster_id in sorted(view_f["Cluster"].unique()):
         cluster_data = view_f[view_f["Cluster"] == cluster_id]
         
+        # Find most common themes/categories in cluster
+        theme_cols = [c for c in cluster_data.columns if c.startswith(('Cat:', 'Fantasy', 'Adventure', 'Economic'))]
+        top_themes = []
+        for col in theme_cols[:10]:  # Check top theme columns
+            if cluster_data[col].sum() > len(cluster_data) * 0.3:  # If >30% have this theme
+                theme_name = col.replace('Cat:', '').replace('_', ' ')
+                top_themes.append(theme_name)
+        
         cluster_stats.append({
-            "Cluster": cluster_id,
+            "Group": f"Type {cluster_id}",
             "Games": len(cluster_data),
             "Avg Rating": f"{cluster_data['BayesAvgRating'].mean():.2f}",
-            "Avg Owners": f"{int(cluster_data['Owned Users'].mean()):,}",
             "Avg Complexity": f"{cluster_data['GameWeight'].mean():.1f}",
             "Avg Play Time": f"{int(cluster_data['Play Time'].mean())} min",
-            "Year Range": f"{int(cluster_data['Year Published'].min())}-{int(cluster_data['Year Published'].max())}"
+            "Common Themes": ", ".join(top_themes[:3]) if top_themes else "Mixed"
         })
     
     cluster_df = pd.DataFrame(cluster_stats)
     st.dataframe(cluster_df, use_container_width=True, hide_index=True)
 
 # ---------------------------------
-# Cluster Explorer Tab (Enhanced)
+# Cluster Explorer Tab (Simplified & More Accessible)
 # ---------------------------------
 with tab_explore:
-    st.subheader("🔭 Deep Dive: Cluster Analysis")
+    st.subheader("🔭 Game Type Deep Dive")
+    st.markdown("**Explore different game categories and see what makes them successful**")
     
     explore_col1, explore_col2 = st.columns([1, 2])
     
     with explore_col1:
-        cluster_pick = st.selectbox("Select cluster to explore:", sorted(view_f["Cluster"].unique()))
+        cluster_pick = st.selectbox("Choose a game type to explore:", 
+                                   sorted(view_f["Cluster"].unique()),
+                                   format_func=lambda x: f"Type {x}")
         
         cluster_data = view_f[view_f["Cluster"] == cluster_pick].copy()
         
-        st.markdown(f"### Cluster {cluster_pick} Overview")
-        st.metric("Total Games", len(cluster_data))
-        st.metric("Avg Rating", f"{cluster_data['BayesAvgRating'].mean():.2f}")
-        st.metric("Avg Complexity", f"{cluster_data['GameWeight'].mean():.1f}")
-        st.metric("Avg Play Time", f"{int(cluster_data['Play Time'].mean())} min")
+        st.markdown(f"### 📋 Type {cluster_pick} Summary")
+        st.metric("**Games in this type**", len(cluster_data))
+        st.metric("**Average player rating**", f"{cluster_data['BayesAvgRating'].mean():.2f}")
+        st.metric("**Typical complexity**", f"{cluster_data['GameWeight'].mean():.1f} / 5.0")
+        st.metric("**Average game length**", f"{int(cluster_data['Play Time'].mean())} minutes")
+        
+        # Show what makes this cluster unique
+        st.markdown("**🎮 What defines this type:**")
+        
+        # Find dominant themes
+        theme_cols = [c for c in cluster_data.columns if c.startswith(('Cat:', 'Fantasy', 'Adventure', 'Economic', 'War', 'Horror'))]
+        dominant_themes = []
+        for col in theme_cols:
+            if cluster_data[col].sum() > len(cluster_data) * 0.4:  # >40% have this theme
+                theme_name = col.replace('Cat:', '').replace('_', ' ')
+                dominant_themes.append(theme_name)
+        
+        if dominant_themes:
+            st.write("🎨 **Themes:** " + ", ".join(dominant_themes[:3]))
+        
+        # Find dominant mechanics
+        mech_cols = [c for c in cluster_data.columns if c.startswith('Mechanic_') or c in ['Dice Rolling', 'Hand Management', 'Set Collection']]
+        dominant_mechs = []
+        for col in mech_cols[:20]:  # Check top mechanics
+            if cluster_data[col].sum() > len(cluster_data) * 0.3:  # >30% have this mechanic
+                mech_name = col.replace('Mechanic_', '').replace('_', ' ')
+                dominant_mechs.append(mech_name)
+        
+        if dominant_mechs:
+            st.write("🔧 **Common mechanics:** " + ", ".join(dominant_mechs[:3]))
         
         # Top games in cluster
-        st.markdown("**🏆 Top Rated Games:**")
+        st.markdown("**🏆 Highest rated games:**")
         top_games = cluster_data.nlargest(5, "BayesAvgRating")[["Name", "BayesAvgRating", "Year Published"]]
         for _, game in top_games.iterrows():
-            st.write(f"• {game['Name']} ({game['Year Published']:.0f}) - {game['BayesAvgRating']:.2f}")
+            st.write(f"• **{game['Name']}** ({game['Year Published']:.0f}) - {game['BayesAvgRating']:.2f}⭐")
     
     with explore_col2:
-        # Cluster visualization
+        # Cluster visualization with better explanation
+        st.markdown(f"### 🗺️ Where Type {cluster_pick} Games Cluster")
+        st.markdown("*Each dot is a game in this type. Size = popularity, Color = rating*")
+        
         fig_cluster = px.scatter(
             cluster_data, x="PCA1", y="PCA2",
             size="Owned Users", color="BayesAvgRating",
             hover_data=["Name", "Year Published", "GameWeight"],
-            color_continuous_scale="Viridis",
-            title=f"Cluster {cluster_pick} - Size by Owners, Color by Rating",
-            height=500
+            color_continuous_scale="RdYlGn",
+            title=f"Type {cluster_pick} Games (Size = Owners, Color = Rating)",
+            height=400
         )
         fig_cluster.update_layout(
             plot_bgcolor=CHART_BG,
             paper_bgcolor=CHART_BG,
-            font_color=MUTED
+            font_color=MUTED,
+            xaxis_title="Game Design Axis →",
+            yaxis_title="Theme/Style Axis →"
         )
         st.plotly_chart(fig_cluster, use_container_width=True)
         
-        # Cluster trends over time
+        # Performance trends over time
+        st.markdown(f"### 📈 Type {cluster_pick} Evolution Over Time")
         yearly_stats = cluster_data.groupby("Year Published").agg({
             "BayesAvgRating": "mean",
             "Owned Users": "mean", 
             "GameWeight": "mean",
             "Name": "count"
         }).reset_index()
-        yearly_stats.rename(columns={"Name": "Game Count"}, inplace=True)
+        yearly_stats.rename(columns={"Name": "Games Released"}, inplace=True)
         
-        if len(yearly_stats) > 1:
-            fig_trends = px.line(
-                yearly_stats, x="Year Published", y="BayesAvgRating",
-                title=f"Rating Trends in Cluster {cluster_pick}",
-                height=300
-            )
+        if len(yearly_stats) > 3:  # Only show if enough data points
+            fig_trends = go.Figure()
+            
+            # Rating trend
+            fig_trends.add_trace(go.Scatter(
+                x=yearly_stats["Year Published"], 
+                y=yearly_stats["BayesAvgRating"],
+                mode='lines+markers',
+                name='Average Rating',
+                line=dict(color=CHART_COLORS[0], width=3),
+                marker=dict(size=8)
+            ))
+            
             fig_trends.update_layout(
+                title=f"How Type {cluster_pick} Games Have Evolved",
+                xaxis_title="Year",
+                yaxis_title="Average Player Rating",
                 plot_bgcolor=CHART_BG,
                 paper_bgcolor=CHART_BG,
+                height=300,
                 font_color=MUTED
             )
             st.plotly_chart(fig_trends, use_container_width=True)
+        else:
+            st.info("Not enough historical data to show trends for this game type.")
 
-    # Detailed game list for the cluster
-    st.markdown("### 📋 All Games in Cluster")
+    # Simplified game list for the cluster
+    st.markdown("### 📚 All Games in This Type")
+    st.markdown(f"*Showing all {len(cluster_data)} games sorted by player rating*")
+    
     display_cols = ["Name", "Year Published", "BayesAvgRating", "Owned Users", "GameWeight", "Play Time"]
     cluster_display = cluster_data[display_cols].sort_values("BayesAvgRating", ascending=False)
-    st.dataframe(cluster_display, use_container_width=True, hide_index=True)
+    
+    # Rename columns for better readability
+    cluster_display_renamed = cluster_display.rename(columns={
+        "Year Published": "Year",
+        "BayesAvgRating": "Rating", 
+        "Owned Users": "Owners",
+        "GameWeight": "Complexity",
+        "Play Time": "Minutes"
+    })
+    
+    st.dataframe(cluster_display_renamed, use_container_width=True, hide_index=True)
 
 # ---------------------------------
 # Footer
