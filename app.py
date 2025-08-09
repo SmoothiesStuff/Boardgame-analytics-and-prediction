@@ -1239,7 +1239,7 @@ with tab_wizard:
                 st.caption(f"💰 Payback: {payback}")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-           narr(f"""
+            narr(f"""
             **Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. If the model likes your rating but owners look soft, the design might be niche or overpriced. If owners look strong but rating is middling, you might have a fun toy that needs sharper decisions. Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes.
             """)
 
@@ -2254,6 +2254,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
