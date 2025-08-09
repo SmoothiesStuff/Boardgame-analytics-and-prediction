@@ -339,6 +339,23 @@ def calculate_market_opportunity_score(cluster_df: pd.DataFrame, year: int = CUR
     )
     
     return min(max(opportunity * 100, 0), 100)
+########## pricing helpers ##########
+def estimate_anchor_price(complexity: float, component_quality: str, production_quality: str,
+                          max_players: int, play_time_min: int) -> float:
+    # Rough MSRP baseline from design signals (tunable)
+    base = 35.0 + (complexity - 2.5) * 6.0
+    if component_quality == "Premium": base += 15
+    elif component_quality == "Good": base += 5
+    if production_quality in ["Premium", "Deluxe"]: base += 10
+    if max_players >= 5: base += 5
+    if play_time_min >= 90: base += 5
+    return float(np.clip(base, 15, 150))
+
+def default_channel_fee_pct(funding_model: str) -> float:
+    # Typical all-in cuts (rough, adjustable)
+    if funding_model == "Traditional": return 0.50   # retail/wholesale stack
+    if funding_model in ["Kickstarter", "Gamefound"]: return 0.12  # platform + processing
+    return 0.40
 
 def identify_mechanic_synergies(df: pd.DataFrame, min_games: int = 10) -> pd.DataFrame:
     """Identify successful mechanic combinations."""
@@ -1165,6 +1182,128 @@ with tab_wizard:
                 payback = "6 months" if roi_estimate > 2 else "12 months" if roi_estimate > 1 else "18+ months"
                 st.caption(f"💰 Payback: {payback}")
                 st.markdown('</div>', unsafe_allow_html=True)
+
+           
+                    ########## Pricing & Unit Economics ##########
+        st.markdown("### 💵 Pricing & Unit Economics")
+        
+        # Use your existing slider value for target price as the default MSRP
+        msrp_default = int(target_price)
+        
+        with st.expander("Set price & costs", expanded=True):
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                msrp = st.slider("Desired Price (MSRP $)", 15, 150, msrp_default, 1, key="msrp_input")
+            with c2:
+                unit_cogs = st.slider("Unit Cost to Produce ($)", 1, 60, 12)
+            with c3:
+                marketing_fixed = st.number_input("Marketing Budget ($, fixed)", 0, 500_000, 25_000, step=1_000)
+            with c4:
+                misc_fixed = st.number_input("Misc & Dev ($, fixed)", 0, 500_000, 15_000, step=1_000)
+        
+            c5, c6, c7 = st.columns(3)
+            with c5:
+                sales_window = st.slider("Sales Window (months)", 3, 36, 12)
+            with c6:
+                shipping_per_unit = st.slider("Fulfillment & Shipping per Unit ($)", 0, 30, 5)
+            with c7:
+                returns_pct = st.slider("Returns/Damage Allowance (%)", 0, 20, 5) / 100.0
+        
+            with st.expander("Advanced assumptions", expanded=False):
+                fee_default = default_channel_fee_pct(kickstarted)
+                channel_fee_pct = st.slider("Retailer / Platform Fee (%)", 0, 70, int(fee_default*100)) / 100.0
+                apply_sensitivity = st.checkbox("Apply price sensitivity to owners", value=True)
+                elasticity = st.slider("Price Elasticity (negative)", -2.0, -0.1,
+                                       -1.1 if kickstarted == "Traditional" else -0.8, 0.1,
+                                       help="Percent change in owners for 1 percent price change vs anchor")
+        
+        # Anchor price from design signals
+        anchor_price = estimate_anchor_price(complexity, component_quality, production_quality, max_players, play_time)
+        
+        # Adjust owners by price (bounded)
+        owners_base = float(predicted_owners)
+        if apply_sensitivity:
+            owners_adj = owners_base * (msrp / max(anchor_price, 1.0)) ** elasticity
+            owners_adj = float(np.clip(owners_adj, owners_base * 0.6, owners_base * 1.4))
+        else:
+            owners_adj = owners_base
+        
+        # Unit economics
+        net_per_unit = msrp * (1 - channel_fee_pct)
+        gross_profit_per_unit = net_per_unit - (unit_cogs + shipping_per_unit)
+        effective_units = owners_adj * (1 - returns_pct)
+        fixed_costs = float(marketing_fixed + misc_fixed)
+        
+        total_gross_profit = gross_profit_per_unit * max(effective_units, 0)
+        net_profit = total_gross_profit - fixed_costs
+        roi_multiple = (net_profit / fixed_costs) if fixed_costs > 0 else float("inf")
+        
+        breakeven_units = (fixed_costs / gross_profit_per_unit) if gross_profit_per_unit > 0 else float("inf")
+        monthly_units = effective_units / max(sales_window, 1)
+        payback_months = math.ceil(breakeven_units / max(monthly_units, 1)) if math.isfinite(breakeven_units) else None
+        gross_margin_pct = (gross_profit_per_unit / net_per_unit) if net_per_unit > 0 else 0.0
+        
+        # Metrics row
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        with m1:
+            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+            st.metric("Adjusted Owners", f"{int(effective_units):,}", f"base {int(owners_base):,}")
+            st.caption(f"Anchor ${anchor_price:.0f} • fee {int(channel_fee_pct*100)}% • returns {int(returns_pct*100)}%")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m2:
+            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+            st.metric("Gross Margin", f"{gross_margin_pct*100:.0f}%/unit")
+            st.caption(f"Unit GP ${gross_profit_per_unit:.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m3:
+            beu_text = f"{int(breakeven_units):,}" if math.isfinite(breakeven_units) and breakeven_units >= 0 else "N/A"
+            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+            st.metric("Break-even Units", beu_text)
+            st.caption("Fixed costs ÷ unit gross profit")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m4:
+            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+            st.metric("Payback", f"{payback_months or 'N/A'} months")
+            st.caption(f"Sales window {sales_window} months")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m5:
+            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+            st.metric("Net Profit", f"${int(net_profit):,}")
+            st.caption("After fixed costs")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with m6:
+            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+            roi_disp = "∞" if roi_multiple == float("inf") else f"{roi_multiple:.1f}x"
+            st.metric("ROI", roi_disp)
+            st.caption("Net profit ÷ fixed costs")
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Profit vs Price sensitivity
+        st.markdown("#### 📈 Profit vs Price (sensitivity)")
+        pmin, pmax = max(10, anchor_price*0.6), min(150, anchor_price*1.4)
+        prices = np.linspace(pmin, pmax, 50)
+        profits = []
+        for p in prices:
+            net_u = p * (1 - channel_fee_pct)
+            gp_u = net_u - (unit_cogs + shipping_per_unit)
+            if apply_sensitivity:
+                own = owners_base * (p / max(anchor_price, 1.0)) ** elasticity
+                own = np.clip(own, owners_base * 0.6, owners_base * 1.4)
+            else:
+                own = owners_base
+            eff = own * (1 - returns_pct)
+            profits.append(gp_u * eff - fixed_costs)
+        
+        fig_price = go.Figure()
+        fig_price.add_trace(go.Scatter(x=prices, y=profits, mode="lines", name="Profit"))
+        fig_price.add_vline(x=msrp, line_dash="dash", line_color="red", annotation_text="Your price")
+        fig_price.add_vline(x=anchor_price, line_dash="dot", line_color="gray", annotation_text="Anchor")
+        fig_price.update_layout(
+            title="Projected Net Profit vs MSRP",
+            xaxis_title="MSRP ($)", yaxis_title="Profit ($)",
+            paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=380
+        )
+        st.plotly_chart(fig_price, use_container_width=True)
 
             ########## design analysis visuals ##########
             st.markdown("### 🎨 Visuals")
@@ -2028,6 +2167,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
