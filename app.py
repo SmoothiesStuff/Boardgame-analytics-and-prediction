@@ -514,14 +514,9 @@ def suggest_from_preset(df: pd.DataFrame, preset_key: str) -> Dict:
         "Play Time": int(round(median_if_available(df, "Play Time", mask, preset.get("play_time", 60)) or 60)),
         "Min Age": int(round(median_if_available(df, "Min Age", mask, preset.get("min_age", 10)) or 10)),
         "GameWeight": float(median_if_available(df, "GameWeight", mask, preset.get("weight", 2.5)) or 2.5),
-        "BestPlayers": 4,  # Default best player count
+        "BestPlayers": 4,
         "mechs_on": preset.get("mechs_on", ["Dice Rolling"]),
         "cats": preset.get("cats", ["Cat:Strategy", "Fantasy"]),
-    } preset.get("play_time", 60)) or 60)),
-        "Min Age": int(round(median_if_available(df, "Min Age", mask, preset.get("min_age", 10)) or 10)),
-        "GameWeight": float(median_if_available(df, "GameWeight", mask, preset.get("weight", 2.5)) or 2.5),
-        "mechs_on": preset.get("mechs_on", []),
-        "cats": preset.get("cats", []),
     }
 
 # Sidebar setup
