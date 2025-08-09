@@ -1336,20 +1336,7 @@ with tab_wizard:
         st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
         
         additional_cols = st.columns(3)
-        
-        with additional_cols[0]:
-            solo_mode = st.checkbox("Include Solo Mode", value=(min_players == 1))
-        
-        with additional_cols[1]:
-            coop_toggle = st.checkbox("Co-op (team vs game)", value=False)
-            vpp_toggle = st.checkbox("Variable Player Powers", value=False)
-        
-        with additional_cols[2]:
-            deck_toggle = st.checkbox("Deck Construction", value=False)
-            worker_toggle = st.checkbox("Worker Placement", value=False)
-            hidden_roles_toggle = st.checkbox("Hidden Roles", value=False)
-        
-        # keep your pricing controls as-is (these don't affect prediction features)
+        )
         with additional_cols[2]:
             target_price = st.slider("Target MSRP ($)", 20, 150, 50, 5)
             component_quality = st.select_slider("Component Quality",
@@ -1357,9 +1344,45 @@ with tab_wizard:
                                                 value="Good")
 
         narr("""
-    **Design first principles.** Start from three anchors. Target complexity that invites thinking without confusion. Land the core loop in 60 to 90 minutes. Aim the minimum age at 10 so families and hobby tables overlap. From there, pick one mechanic that does the heavy lifting and one that creates emergent texture. Resist adding a third that just adds rules.
+    **Design first principles.** Start from three anchors. Target complexity that invites thinking without confusion. 
+    Land the core loop in 60 to 90 minutes. Aim the minimum age at 10 so families and hobby tables overlap. 
+    rom there, pick one mechanic that does the heavy lifting and one that creates emergent texture. Resist adding a third that just adds rules.
     """)
 
+            # --- Pricing & Unit Economics (inputs before analysis) ---
+        st.markdown("#### Pricing & Unit Economics")
+        with st.expander("Set price & cost assumptions", expanded=True):
+            r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+            with r1c1:
+                target_price = st.slider("Target MSRP ($)", 20, 150, 50, 1, key="msrp_input")
+            with r1c2:
+                component_quality = st.select_slider("Component Quality", ["Basic", "Good", "Premium"], value="Good")
+            with r1c3:
+                sales_window = st.slider("Sales Window (months)", 3, 36, 12)
+            with r1c4:
+                returns_pct = st.slider("Returns/Damage Allowance (%)", 0, 20, 5) / 100.0
+        
+            r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+            with r2c1:
+                unit_cogs = st.slider("Unit Cost to Produce ($)", 1, 60, 12)
+            with r2c2:
+                shipping_per_unit = st.slider("Fulfillment & Shipping per Unit ($)", 0, 30, 5)
+            with r2c3:
+                marketing_fixed = st.number_input("Marketing Budget ($, fixed)", 0, 500_000, 25_000, step=1_000)
+            with r2c4:
+                misc_fixed = st.number_input("Misc & Dev ($, fixed)", 0, 500_000, 15_000, step=1_000)
+        
+            with st.expander("Advanced assumptions", expanded=False):
+                fee_default = default_channel_fee_pct(kickstarted)
+                channel_fee_pct = st.slider("Retailer / Platform Fee (%)", 0, 70, int(fee_default*100)) / 100.0
+                apply_sensitivity = st.checkbox("Apply price elasticity to owners", value=True)
+                elasticity = st.slider(
+                    "Price Elasticity (negative)",
+                    -2.0, -0.1,
+                    -1.1 if kickstarted == "Traditional" else -0.8, 0.1,
+                    help="Percent change in owners for 1 percent price change vs anchor"
+                )
+    # --- end pricing inputs ---
         analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", 
                                               type="primary", use_container_width=True)
         
@@ -1510,39 +1533,35 @@ with tab_wizard:
 
                         ########## Pricing & Unit Economics ##########
             st.markdown("### 💵 Pricing & Unit Economics")
+            # Use inputs captured in the form
+            msrp = float(target_price)  # same slider, just a local alias
+            anchor_price = estimate_anchor_price(
+                complexity, component_quality, production_quality, max_players, play_time
+            )
             
-            # Use your existing slider value for target price as the default MSRP
-            msrp_default = int(target_price)
+            # Adjust owners by price (bounded)
+            owners_base = float(predicted_owners)
+            if apply_sensitivity:
+                owners_adj = owners_base * (msrp / max(anchor_price, 1.0)) ** elasticity
+                owners_adj = float(np.clip(owners_adj, owners_base * 0.6, owners_base * 1.4))
+            else:
+                owners_adj = owners_base
             
-            with st.expander("Set price & costs", expanded=True):
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
-                    msrp = st.slider("Desired Price (MSRP $)", 15, 150, msrp_default, 1, key="msrp_input")
-                with c2:
-                    unit_cogs = st.slider("Unit Cost to Produce ($)", 1, 60, 12)
-                with c3:
-                    marketing_fixed = st.number_input("Marketing Budget ($, fixed)", 0, 500_000, 25_000, step=1_000)
-                with c4:
-                    misc_fixed = st.number_input("Misc & Dev ($, fixed)", 0, 500_000, 15_000, step=1_000)
+            # Unit economics
+            net_per_unit = msrp * (1 - channel_fee_pct)
+            gross_profit_per_unit = net_per_unit - (unit_cogs + shipping_per_unit)
+            effective_units = owners_adj * (1 - returns_pct)
+            fixed_costs = float(marketing_fixed + misc_fixed)
             
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    sales_window = st.slider("Sales Window (months)", 3, 36, 12)
-                with c6:
-                    shipping_per_unit = st.slider("Fulfillment & Shipping per Unit ($)", 0, 30, 5)
-                with c7:
-                    returns_pct = st.slider("Returns/Damage Allowance (%)", 0, 20, 5) / 100.0
+            total_gross_profit = gross_profit_per_unit * max(effective_units, 0)
+            net_profit = total_gross_profit - fixed_costs
+            roi_multiple = (net_profit / fixed_costs) if fixed_costs > 0 else float("inf")
             
-                with st.expander("Advanced assumptions", expanded=False):
-                    fee_default = default_channel_fee_pct(kickstarted)
-                    channel_fee_pct = st.slider("Retailer / Platform Fee (%)", 0, 70, int(fee_default*100)) / 100.0
-                    apply_sensitivity = st.checkbox("Apply price sensitivity to owners", value=True)
-                    elasticity = st.slider("Price Elasticity (negative)", -2.0, -0.1,
-                                           -1.1 if kickstarted == "Traditional" else -0.8, 0.1,
-                                           help="Percent change in owners for 1 percent price change vs anchor")
+            breakeven_units = (fixed_costs / gross_profit_per_unit) if gross_profit_per_unit > 0 else float("inf")
+            monthly_units = effective_units / max(sales_window, 1)
+            payback_months = math.ceil(breakeven_units / max(monthly_units, 1)) if math.isfinite(breakeven_units) else None
+            gross_margin_pct = (gross_profit_per_unit / net_per_unit) if net_per_unit > 0 else 0.0
             
-            # Anchor price from design signals
-            anchor_price = estimate_anchor_price(complexity, component_quality, production_quality, max_players, play_time)
             
             # Adjust owners by price (bounded)
             owners_base = float(predicted_owners)
@@ -2519,6 +2538,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
