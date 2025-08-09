@@ -95,6 +95,15 @@ h1, h2, h3, h4 {{ color: {ACCENT}; font-family: 'Georgia', serif; }}
     margin: 1rem 0;
     border-radius: 0 8px 8px 0;
 }}
+/* styled narrative blockquotes */
+.stApp blockquote {
+    background: linear-gradient(90deg, {CHART_BG} 0%, #FFF 100%);
+    border-left: 5px solid {ACCENT};
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+    color: {MUTED};
+}
 .recommendation-card {{
     background: {CHART_BG};
     border: 2px dashed {SECONDARY};
@@ -780,7 +789,9 @@ st.sidebar.checkbox("Show narrative insights", True, key="show_narrative")
 
 def narr(md: str):
     if st.session_state.get("show_narrative", True):
-        st.markdown(f"<div class='insight-box'>{md}</div>", unsafe_allow_html=True)
+        # render as a blockquote so markdown (like **bold**) is parsed
+        bl = "> " + md.strip().replace("\n", "\n> ")
+        st.markdown(bl)
 
 # Convert play time range to minutes
 pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
@@ -2254,6 +2265,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
