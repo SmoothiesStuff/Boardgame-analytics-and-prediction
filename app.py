@@ -112,18 +112,54 @@ def split_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 @st.cache_resource(show_spinner=False)
 def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
-    if len(X) < k:
-        k = max(2, len(X))
+    # scale first
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+
+    # how many distinct points do we actually have?
     try:
-        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init="auto")
+        # unique on rows (OK for moderate N; if huge, switch to hashing)
+        n_unique = np.unique(X_scaled, axis=0).shape[0]
+    except Exception:
+        # fallback if memory-constrained
+        n_unique = max(1, len(X))
+
+    # choose a safe k
+    k_eff = max(2, min(k, n_unique, len(X)))
+
+    # if we still can't cluster meaningfully, fall back to single cluster
+    if k_eff < 2:
+        labels = np.zeros(len(X), dtype=int)
+        # PCA guards (need at least 2 features and 2 samples)
+        n_comp = int(min(2, X_scaled.shape[1], max(1, len(X_scaled))))
+        if n_comp >= 2:
+            pca = PCA(n_components=2, random_state=random_state)
+            coords = pca.fit_transform(X_scaled)
+        else:
+            coords = np.c_[X_scaled[:, :1], np.zeros((len(X_scaled), 1))]
+        # dummy kmeans-like object
+        class _DummyK:
+            def predict(self, Z): return np.zeros(len(Z), dtype=int)
+        return scaler, _DummyK(), None, labels, coords
+
+    # fit kmeans safely
+    try:
+        kmeans = KMeans(n_clusters=k_eff, random_state=random_state, n_init="auto")
     except TypeError:
-        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+        kmeans = KMeans(n_clusters=k_eff, random_state=random_state, n_init=10)
     labels = kmeans.fit_predict(X_scaled)
-    pca = PCA(n_components=2, random_state=random_state)
-    coords = pca.fit_transform(X_scaled)
+
+    # PCA with guards
+    n_comp = int(min(2, X_scaled.shape[1], len(X_scaled)))
+    if n_comp >= 2:
+        pca = PCA(n_components=2, random_state=random_state)
+        coords = pca.fit_transform(X_scaled)
+    else:
+        coords = np.c_[X_scaled[:, :1], np.zeros((len(X_scaled), 1))]
+        pca = None
+
     return scaler, kmeans, pca, labels, coords
+
 
 def year_percentile(series: pd.Series, value: float) -> float:
     if series is None or len(series) == 0:
@@ -474,7 +510,10 @@ mask &= view[year_col].between(yr_rng[0], yr_rng[1])
 mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
 mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])  # Filter using original minutes
 view_f = view[mask].copy()
-
+if view_f.empty:
+    st.warning("No games match the current filters. Adjust the filters to see data.")
+    st.stop()
+    
 # Header
 st.title("🎲 Board Game Developer Console")
 st.markdown("**Analyze market trends, test game concepts, and discover opportunities in the board game space**")
@@ -942,9 +981,15 @@ with tab_explore:
     explore_col1, explore_col2 = st.columns([1, 2])
     
     with explore_col1:
-        cluster_pick = st.selectbox("Choose a game type to explore:", 
-                                   sorted(view_f["Cluster"].unique()),
-                                   format_func=lambda x: f"Type {x}")
+    clusters_available = sorted(view_f["Cluster"].unique())
+    if len(clusters_available) == 0:
+        st.info("No clusters available with current filters.")
+        st.stop()
+    cluster_pick = st.selectbox(
+        "Choose a game type to explore:",
+        clusters_available,
+        format_func=lambda x: f"Type {x}"
+    )
         
         cluster_data = view_f[view_f["Cluster"] == cluster_pick].copy()
         
@@ -1064,3 +1109,4 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
