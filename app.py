@@ -1,5 +1,4 @@
-
-        # streamlit_app.py — Enhanced Board Game Developer Console
+# streamlit_app.py — Enhanced Board Game Developer Console
 import os
 import math
 from typing import Dict, List, Tuple
@@ -642,18 +641,6 @@ with tab_dashboard:
         fig4 = create_year_line_chart(view_f)
         st.plotly_chart(fig4, use_container_width=True)
     
-    # Additional analysis charts
-    st.markdown("### 📈 Trend Analysis")
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        fig3 = create_complexity_binned_chart(view_f)
-        st.plotly_chart(fig3, use_container_width=True)
-        
-    with col4:
-        fig4 = create_year_line_chart(view_f)
-        st.plotly_chart(fig4, use_container_width=True)
-    
     st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
     st.markdown("### 🔍 Key Market Insights")
     
@@ -1193,4 +1180,3 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
-
