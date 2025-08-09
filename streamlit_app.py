@@ -1,17 +1,82 @@
-# streamlit_app.py
+# streamlit_app.py (revised)
+# Runs even on a fresh env by auto-installing missing packages.
+# Keeps your existing functionality, plus a few hardening fixes.
+
 import os
 import sys
-import json
-import numpy as np
-import pandas as pd
-import streamlit as st
-import plotly.express as px
+import subprocess
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.metrics import pairwise_distances
-from joblib import load as joblib_load
+# -------------------------------
+# Bootstrap: ensure required packages are installed
+# -------------------------------
+REQUIRED = [
+    ("pandas", "pandas", None),
+    ("numpy", "numpy", None),
+    ("streamlit", "streamlit", None),
+    ("plotly", "plotly", None),
+    ("scikit-learn", "sklearn", None),
+    ("joblib", "joblib", None),
+]
+
+# XGBoost is optional — we only attempt to import if any XGB models exist
+OPTIONAL = [("xgboost", "xgboost", None)]
+
+
+def _pip_install(package_spec: str):
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package_spec])
+        return True
+    except Exception:
+        return False
+
+
+def ensure_package(pkg_name: str, import_name: str, version: str | None):
+    try:
+        __import__(import_name)
+        return True
+    except Exception:
+        spec = f"{pkg_name}=={version}" if version else pkg_name
+        ok = _pip_install(spec)
+        if ok:
+            try:
+                __import__(import_name)
+                return True
+            except Exception:
+                return False
+        return False
+
+
+# Install required packages
+_missing = []
+for pkg_name, import_name, version in REQUIRED:
+    if not ensure_package(pkg_name, import_name, version):
+        _missing.append(pkg_name)
+
+# Defer Streamlit import until after installation attempt
+try:
+    import numpy as np
+    import pandas as pd
+    import streamlit as st
+    import plotly.express as px
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.cluster import KMeans
+    from sklearn.decomposition import PCA
+    from sklearn.metrics import pairwise_distances
+    from joblib import load as joblib_load
+except Exception as e:
+    # If Streamlit isn't available we can't render UI, but try to print a helpful note
+    print("Failed to import a required library after install attempts:", e)
+    raise
+
+# If anything failed to install, surface a warning in the UI but keep going if possible
+if _missing:
+    st.warning(
+        "Some packages could not be auto-installed: " + ", ".join(sorted(set(_missing))) +
+        " — please run: pip install " + " ".join(sorted(set(_missing)))
+    )
+
+# Conditionally load xgboost if any XGB models are present
+HAS_XGB_MODELS = False
 
 st.set_page_config(page_title="Board Game Developer Console", layout="wide")
 
@@ -20,16 +85,14 @@ st.set_page_config(page_title="Board Game Developer Console", layout="wide")
 # -------------------------------
 EXCLUDE_FOR_CLUSTERING = [
     # post-release or target-ish
-    'Owned Users', 'LogOwned', 'BayesAvgRating', 'SalesPercentile',
-    'Users Rated', 'BGG Rank', 'StdDev',
+    "Owned Users", "LogOwned", "BayesAvgRating", "SalesPercentile",
+    "Users Rated", "BGG Rank", "StdDev",
     # IDs and non-features
-    'ID', 'BGGId', 'Name', 'Description'
+    "ID", "BGGId", "Name", "Description",
 ]
 
-# You can add/remove here if needed:
 ALWAYS_NUMERIC_DEFAULT_ZERO = True
 
-# Default model paths (change as needed)
 MODEL_PATHS = {
     "rating_rf": "models/rating_rf.joblib",
     "rating_xgb": "models/rating_xgb.joblib",
@@ -37,57 +100,88 @@ MODEL_PATHS = {
     "sales_xgb": "models/sales_xgb.joblib",
 }
 
+# Detect whether any XGB models exist; if so, ensure xgboost is available
+for k in ("rating_xgb", "sales_xgb"):
+    if os.path.exists(MODEL_PATHS.get(k, "")):
+        HAS_XGB_MODELS = True
+        break
+
+if HAS_XGB_MODELS:
+    ok = ensure_package("xgboost", "xgboost", None)
+    if not ok:
+        st.warning("XGBoost model files detected but 'xgboost' could not be installed. XGB predictions will be unavailable.")
+
 # -------------------------------
 # Helpers
 # -------------------------------
 @st.cache_data(show_spinner=False)
 def load_df(uploaded_file):
     if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-    else:
-        # fallback to default path if present
-        default_path = "cleaned_large_bgg_dataset.csv"
-        if os.path.exists(default_path):
-            df = pd.read_csv(default_path)
-        else:
+        try:
+            return pd.read_csv(uploaded_file)
+        except Exception as e:
+            st.error(f"Failed to read uploaded CSV: {e}")
             st.stop()
-    return df
+    default_path = "cleaned_large_bgg_dataset.csv"
+    if os.path.exists(default_path):
+        try:
+            return pd.read_csv(default_path)
+        except Exception as e:
+            st.error(f"Failed to read default CSV at {default_path}: {e}")
+            st.stop()
+    st.error("No dataset provided. Upload cleaned_large_bgg_dataset.csv or place it alongside this app.")
+    st.stop()
 
-def split_features(df):
+
+def split_features(df: pd.DataFrame):
     # Cluster features = numeric columns excluding post-release/IDs
     X = df.drop(columns=[c for c in EXCLUDE_FOR_CLUSTERING if c in df.columns], errors="ignore")
-    X = X.select_dtypes(include="number")
+    X = X.select_dtypes(include=["number"])  # numeric only
     if ALWAYS_NUMERIC_DEFAULT_ZERO:
         X = X.fillna(0)
     # Keep non-feature columns for reporting
-    keep_cols = [c for c in df.columns if c not in X.columns] + ["Name"]
+    keep_cols = [c for c in df.columns if c not in X.columns] + (["Name"] if "Name" in df.columns else [])
     keep_cols = [c for c in keep_cols if c in df.columns]
     meta = df[keep_cols].copy()
     return X, meta
 
+
 @st.cache_resource(show_spinner=False)
-def fit_clusterer(X, k=8, random_state=42):
+def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
+    if len(X) < k:
+        st.warning("k is larger than the number of rows; reducing k.")
+        k = max(2, int(max(2, len(X) // 2)))
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    kmeans = KMeans(n_clusters=k, random_state=random_state, n_init="auto")
+    # Use robust default for broader sklearn compatibility
+    try:
+        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init="auto")
+    except TypeError:
+        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init=10)
     labels = kmeans.fit_predict(X_scaled)
     pca = PCA(n_components=2, random_state=random_state)
     coords = pca.fit_transform(X_scaled)
     return scaler, kmeans, pca, labels, coords
 
-def year_percentile(series, value):
-    # percent of values strictly below value
-    if len(series) == 0:
-        return np.nan
-    return float((series < value).mean() * 100.0)
 
-def build_input_vector(Xcols, profile_dict):
+def year_percentile(series: pd.Series, value: float):
+    # percent of values strictly below 'value'
+    if series is None or len(series) == 0:
+        return np.nan
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if len(s) == 0:
+        return np.nan
+    return float((s < value).mean() * 100.0)
+
+
+def build_input_vector(Xcols, profile_dict: dict):
     # Fill missing keys in profile with 0; keep only Xcols order
     filled = {c: 0 for c in Xcols}
     for k, v in profile_dict.items():
         if k in filled:
             filled[k] = v
     return pd.DataFrame([filled])[Xcols]
+
 
 def nearest_neighbors_in_cluster(input_scaled, cluster_id, df_full, X, scaler, kmeans, topn=10):
     # filter same cluster
@@ -101,8 +195,9 @@ def nearest_neighbors_in_cluster(input_scaled, cluster_id, df_full, X, scaler, k
     dfc["__dist"] = dists
     return dfc.nsmallest(topn, "__dist")
 
+
 @st.cache_resource(show_spinner=False)
-def load_models(paths_dict):
+def load_models(paths_dict: dict):
     models = {}
     for key, path in paths_dict.items():
         if os.path.exists(path):
@@ -110,26 +205,30 @@ def load_models(paths_dict):
                 models[key] = joblib_load(path)
             except Exception as e:
                 st.warning(f"Could not load {key} at {path}: {e}")
-        # silently ignore missing; UI will reflect availability
     return models
 
-def predict_with_models(models, X_input_df):
+
+def predict_with_models(models: dict, X_input_df: pd.DataFrame):
     out = {}
     for key, model in models.items():
         try:
             out[key] = float(model.predict(X_input_df)[0])
-        except Exception as e:
+        except Exception:
             out[key] = None
     return out
 
-def rf_confidence_std(model, X_input_df):
+
+def rf_confidence_std(model, X_input_df: pd.DataFrame):
     # std of predictions across trees (proxy for uncertainty)
     try:
-        ests = model.estimators_
+        ests = getattr(model, "estimators_", None)
+        if ests is None:
+            return None
         preds = np.column_stack([est.predict(X_input_df) for est in ests])
         return float(np.std(preds, axis=1)[0])
     except Exception:
         return None
+
 
 # -------------------------------
 # Sidebar: data + settings
@@ -149,6 +248,7 @@ st.sidebar.caption("Optional: Place trained models in ./models or update paths i
 # -------------------------------
 X_all, meta = split_features(df)
 scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
+
 df_view = df.copy()
 df_view["Cluster"] = labels
 df_view["PCA1"] = coords[:, 0]
@@ -173,7 +273,7 @@ fig = px.scatter(
     y="PCA2",
     color=color_by,
     hover_data=hover_cols,
-    title=f"PCA Projection (k={k})"
+    title=f"PCA Projection (k={k})",
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -182,17 +282,12 @@ st.plotly_chart(fig, use_container_width=True)
 # -------------------------------
 st.subheader("📊 Cluster Summaries")
 summary_cols = []
-if "BayesAvgRating" in df_view.columns:
-    summary_cols.append("BayesAvgRating")
-if "Owned Users" in df_view.columns:
-    summary_cols.append("Owned Users")
-if "GameWeight" in df_view.columns:
-    summary_cols.append("GameWeight")
-if "Play Time" in df_view.columns:
-    summary_cols.append("Play Time")
+for c in ("BayesAvgRating", "Owned Users", "GameWeight", "Play Time"):
+    if c in df_view.columns:
+        summary_cols.append(c)
 
 if summary_cols:
-    cluster_summary = df_view.groupby("Cluster")[summary_cols].agg(["count", "mean", "median"])
+    cluster_summary = df_view.groupby("Cluster")[summary_cols].agg(["count", "mean", "median"]).round(2)
     st.dataframe(cluster_summary)
 else:
     st.info("No summary columns available (e.g., BayesAvgRating / Owned Users).")
@@ -218,21 +313,23 @@ with st.form("concept_form"):
 
     # Mechanic and Theme toggles based on columns present
     mech_cols = sorted([c for c in X_all.columns if c.startswith("Mechanic_")])
-    theme_cols = sorted([c for c in X_all.columns if c.startswith("Theme_") or c in [
-        "Fantasy","Adventure","Horror","Science Fiction","Space Exploration","Animals","Sports"
-    ] and c in X_all.columns])
+    theme_like_cols = [
+        c for c in X_all.columns
+        if c.startswith("Theme_") or c in {"Fantasy", "Adventure", "Horror", "Science Fiction", "Space Exploration", "Animals", "Sports"}
+    ]
+    theme_cols = sorted(theme_like_cols)
 
     st.markdown("**Select mechanics and themes:**")
-    selected_mechs = st.multiselect("Mechanics", mech_cols[:50], default=[])
-    selected_themes = st.multiselect("Themes", theme_cols[:50], default=[])
+    selected_mechs = st.multiselect("Mechanics", mech_cols[:100], default=[])
+    selected_themes = st.multiselect("Themes", theme_cols[:100], default=[])
 
     # Advanced numeric fields (optional)
     st.markdown("**Optional numeric fields:** (leave blank to default to 0)")
     adv_cols = [
-        "ComAgeRec","LanguageEase","NumWant","NumWish",
-        "MfgPlaytime","ComMinPlaytime","ComMaxPlaytime","MfgAgeRec",
-        "NumAlternates","NumExpansions","NumImplementations",
-        "IsReimplementation"
+        "ComAgeRec", "LanguageEase", "NumWant", "NumWish",
+        "MfgPlaytime", "ComMinPlaytime", "ComMaxPlaytime", "MfgAgeRec",
+        "NumAlternates", "NumExpansions", "NumImplementations",
+        "IsReimplementation",
     ]
     adv_vals = {}
     a1, a2, a3, a4 = st.columns(4)
@@ -254,7 +351,6 @@ if submitted:
         "Kickstarted": 1 if kickstarted == "Yes" else 0,
         "BestPlayers": best_players,
     }
-    # add optionals
     profile.update(adv_vals)
 
     # turn on mechanics/themes
@@ -269,7 +365,7 @@ if submitted:
 
     # Scale and cluster assign
     x_scaled = scaler.transform(x_input)
-    assigned_cluster = int(kmeans.predict(x_scaled)[0])
+    assigned_cluster = int(getattr(kmeans, "predict")(x_scaled)[0])
 
     st.success(f"Assigned to Cluster **{assigned_cluster}**")
 
@@ -280,21 +376,16 @@ if submitted:
 
     # Build year-relative stats for neighbors
     rows = []
+    has_year = "Year Published" in df_view.columns
     for _, r in neighbors.iterrows():
         year = int(r.get("Year Published", 0))
-        same_year = df_view[df_view["Year Published"] == year] if "Year Published" in df_view.columns else pd.DataFrame()
+        same_year = df_view[df_view["Year Published"] == year] if has_year else pd.DataFrame()
 
         bayes = r.get("BayesAvgRating", np.nan)
         owned = r.get("Owned Users", np.nan)
 
-        bayes_pct = year_percentile(same_year["BayesAvgRating"]) if "BayesAvgRating" in same_year else np.nan
-        owned_pct = year_percentile(same_year["Owned Users"]) if "Owned Users" in same_year else np.nan
-
-        # if series missing, compute gracefully
-        if "BayesAvgRating" in same_year:
-            bayes_pct = year_percentile(same_year["BayesAvgRating"].dropna(), bayes)
-        if "Owned Users" in same_year:
-            owned_pct = year_percentile(same_year["Owned Users"].dropna(), owned)
+        bayes_pct = year_percentile(same_year.get("BayesAvgRating", pd.Series(dtype=float)), bayes) if has_year else np.nan
+        owned_pct = year_percentile(same_year.get("Owned Users", pd.Series(dtype=float)), owned) if has_year else np.nan
 
         rows.append({
             "Name": r.get("Name", "Unknown"),
@@ -304,7 +395,7 @@ if submitted:
             "Bayes Rating": None if pd.isna(bayes) else round(float(bayes), 2),
             "Better Than X% (Rating, same year)": None if pd.isna(bayes_pct) else f"{bayes_pct:.0f}%",
             "Owned Users": None if pd.isna(owned) else int(owned),
-            "Better Than X% (Sales, same year)": None if pd.isna(owned_pct) else f"{owned_pct:.0f}%"
+            "Better Than X% (Sales, same year)": None if pd.isna(owned_pct) else f"{owned_pct:.0f}%",
         })
 
     nn_df = pd.DataFrame(rows)
@@ -316,7 +407,7 @@ if submitted:
         "Download neighbors as CSV",
         data=nn_df.to_csv(index=False).encode("utf-8"),
         file_name="nearest_neighbors.csv",
-        mime="text/csv"
+        mime="text/csv",
     )
 
     # Optional: predictions (if models exist)
@@ -344,13 +435,17 @@ if submitted:
         # RF confidence proxy if RF models are available
         conf_cols = st.columns(2)
         rf_rating = models.get("rating_rf")
-        rf_sales  = models.get("sales_rf")
+        rf_sales = models.get("sales_rf")
         if rf_rating is not None:
             r_std = rf_confidence_std(rf_rating, x_input)
-            conf_cols[0].caption(f"RF rating σ (lower≈more confident): {r_std:.3f}" if r_std is not None else "RF rating σ: n/a")
+            conf_cols[0].caption(
+                f"RF rating σ (lower≈more confident): {r_std:.3f}" if r_std is not None else "RF rating σ: n/a"
+            )
         if rf_sales is not None:
             s_std = rf_confidence_std(rf_sales, x_input)
-            conf_cols[1].caption(f"RF sales σ (lower≈more confident): {s_std:.3f}" if s_std is not None else "RF sales σ: n/a")
+            conf_cols[1].caption(
+                f"RF sales σ (lower≈more confident): {s_std:.3f}" if s_std is not None else "RF sales σ: n/a"
+            )
 
 # -------------------------------
 # BONUS: Cluster Explorer
@@ -364,9 +459,10 @@ left, right = st.columns([2, 1])
 with left:
     fig2 = px.scatter(
         dfc,
-        x="PCA1", y="PCA2",
+        x="PCA1",
+        y="PCA2",
         hover_data=hover_cols,
-        title=f"Cluster {cluster_pick} games (PCA)"
+        title=f"Cluster {cluster_pick} games (PCA)",
     )
     st.plotly_chart(fig2, use_container_width=True)
 with right:
