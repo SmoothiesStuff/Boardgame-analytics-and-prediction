@@ -1,0 +1,12 @@
+[theme]
+# Overall style
+base="light"                                # Light mode with warm accents
+primaryColor="#5E7A61"                      # Sage green (buttons, sliders, highlights)
+backgroundColor="#F8F6F0"                   # Soft parchment background
+secondaryBackgroundColor="#E7E3D4"          # Sidebar / widget background
+textColor="#3A3A3A"                          # Charcoal text
+font="serif"                                # Warmer, print-like typography
+
+# Streamlit-specific extra keys
+[global]
+hideTopBar=false                            # Keep the top bar visible
