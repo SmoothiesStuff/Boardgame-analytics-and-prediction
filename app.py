@@ -450,6 +450,93 @@ def suggest_from_preset(df: pd.DataFrame, preset_key: str) -> Dict:
         "mechs_on": preset.get("mechs_on", []),
         "cats": preset.get("cats", []),
     }
+def _bucket_rating(x: float) -> str:
+    if pd.isna(x): return ""
+    if x >= 7.8: return "elite rated"
+    if x >= 7.2: return "well rated"
+    if x >= 6.5: return "solid"
+    return "lower rated"
+
+def _bucket_complexity(x: float) -> str:
+    if pd.isna(x): return ""
+    if x < 2.0: return "simple"
+    if x < 3.0: return "medium"
+    return "complex"
+
+def _bucket_duration(hours: float) -> str:
+    if pd.isna(hours): return ""
+    if hours < 0.75: return "short"
+    if hours < 1.75: return "mid length"
+    return "long"
+
+def _popularity_word(median_owners: float, overall_median: float) -> str:
+    if pd.isna(median_owners) or pd.isna(overall_median): return ""
+    if median_owners >= overall_median * 1.4: return "popular"
+    if median_owners <= max(1.0, overall_median * 0.6): return "niche"
+    return ""
+
+def _top_signals(cluster_df: pd.DataFrame, kind: str, min_share: float, limit: int) -> list[str]:
+    """kind in {'theme','mech'}; returns top column names cleaned."""
+    if kind == "theme":
+        cols = [c for c in cluster_df.columns if c.startswith(('Cat:', 'Fantasy', 'Adventure', 'Economic', 'Science Fiction', 'War', 'Horror'))]
+    else:
+        cols = [c for c in cluster_df.columns if c.startswith('Mechanic_') or c in ['Dice Rolling','Hand Management','Set Collection','Worker Placement','Cooperative Game','Deck Construction','Action Points','Variable Player Powers']]
+    shares = []
+    n = max(1, len(cluster_df))
+    for c in cols:
+        try:
+            share = float(pd.to_numeric(cluster_df[c], errors="coerce").fillna(0).mean())
+        except Exception:
+            share = 0.0
+        if share >= min_share:
+            shares.append((c, share))
+    shares.sort(key=lambda t: t[1], reverse=True)
+    names = []
+    for c, _ in shares[:limit]:
+        name = c.replace('Cat:', '').replace('Mechanic_', '').replace('_', ' ').strip()
+        names.append(name)
+    return names
+
+def generate_cluster_name(cluster_id: int, cluster_df: pd.DataFrame, overall_df: pd.DataFrame) -> str:
+    avg_rating = float(pd.to_numeric(cluster_df.get("AvgRating"), errors="coerce").mean())
+    avg_weight = float(pd.to_numeric(cluster_df.get("GameWeight"), errors="coerce").mean())
+    avg_hours  = float(pd.to_numeric(cluster_df.get("Play Time Hours"), errors="coerce").mean())
+    med_owners = float(pd.to_numeric(cluster_df.get("Owned Users"), errors="coerce").median())
+
+    overall_med_owners = float(pd.to_numeric(overall_df.get("Owned Users"), errors="coerce").median())
+
+    words = []
+    pop = _popularity_word(med_owners, overall_med_owners)
+    if pop: words.append(pop)
+
+    r = _bucket_rating(avg_rating)
+    if r: words.append(r)
+
+    c = _bucket_complexity(avg_weight)
+    if c: words.append(c)
+
+    d = _bucket_duration(avg_hours)
+    if d: words.append(d)
+
+    # Prefer themes first, fall back to mechanics
+    themes = _top_signals(cluster_df, kind="theme", min_share=0.40, limit=2)
+    mechs  = _top_signals(cluster_df, kind="mech",  min_share=0.35, limit=1)
+
+    topic_bits = []
+    if themes:
+        topic_bits.append(", ".join(themes))
+    elif mechs:
+        topic_bits.append(", ".join(mechs))
+
+    tail = ""
+    if topic_bits:
+        # turn theme words into a compact noun phrase (e.g., "strategy, economic")
+        tail = f" {topic_bits[0].lower()}"
+
+    body = " ".join([w for w in words if w])
+    body = body.strip() if body else "mixed"
+
+    return f"Type {cluster_id}: {body}{(' ' if body and tail else '')}games{tail}"
 
 # Sidebar setup
 st.sidebar.title("🎲 Game Data Controls")
@@ -510,6 +597,9 @@ mask &= view[year_col].between(yr_rng[0], yr_rng[1])
 mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
 mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])  # Filter using original minutes
 view_f = view[mask].copy()
+# Build cluster name map for the current filtered view
+cluster_name_map = {cid: generate_cluster_name(cid, view_f[view_f["Cluster"] == cid], view_f)
+                    for cid in sorted(view_f["Cluster"].unique())}
 if view_f.empty:
     st.warning("No games match the current filters. Adjust the filters to see data.")
     st.stop()
@@ -962,7 +1052,7 @@ with tab_map:
                 top_themes.append(theme_name)
         
         cluster_stats.append({
-            "Group": f"Type {cluster_id}",
+            "Group": cluster_name_map.get(cluster_id, f"Type {cluster_id}"),
             "Games": len(cluster_data),
             "Avg Rating": f"{cluster_data['AvgRating'].mean():.2f}",
             "Avg Complexity": f"{cluster_data['GameWeight'].mean():.1f}",
@@ -985,21 +1075,25 @@ with tab_explore:
         if len(clusters_available) == 0:
             st.info("No clusters available with current filters.")
             st.stop()
-
+        
+        # Use pretty names
+        def _fmt_cluster(x: int) -> str:
+            return cluster_name_map.get(x, f"Type {x}")
+        
         cluster_pick = st.selectbox(
             "Choose a game type to explore:",
             clusters_available,
-            format_func=lambda x: f"Type {x}"
+            format_func=_fmt_cluster
         )
-
+        
         cluster_data = view_f[view_f["Cluster"] == cluster_pick].copy()
-
-        st.markdown(f"### 📋 Type {cluster_pick} Summary")
+        
+        st.markdown(f"### 📋 {_fmt_cluster(cluster_pick)}")
         st.metric("**Games in this type**", len(cluster_data))
         st.metric("**Average player rating**", f"{cluster_data['AvgRating'].mean():.2f}")
         st.metric("**Typical complexity**", f"{cluster_data['GameWeight'].mean():.1f} / 5.0")
         st.metric("**Average game length**", f"{cluster_data['Play Time Hours'].mean():.1f} hours")
-
+        
         st.markdown("**🎮 What defines this type:**")
 
         
@@ -1111,6 +1205,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
