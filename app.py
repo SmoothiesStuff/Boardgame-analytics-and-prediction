@@ -212,6 +212,7 @@ def discover_available_themes(X_cols, preset_cats=None, limit=60):
             if c not in seen:
                 ordered.append(c); seen.add(c)
     return ordered[:limit]
+# ---------- Toggle helpers ----------
 def discover_mechanics(cols):
     base = [c for c in cols if isinstance(c, str) and c.startswith("Mechanic_")]
     extras = [c for c in [
@@ -220,7 +221,6 @@ def discover_mechanics(cols):
         "Tile Placement","Area Majority / Influence","Pattern Building","Grid Movement",
         "Market","Network and Route Building","Auction/Bidding"
     ] if c in cols]
-    # de-dupe, preserve order
     seen, ordered = set(), []
     for c in base + extras:
         if c not in seen:
@@ -244,20 +244,33 @@ def discover_themes(cols):
     return ordered
 
 def render_toggle_grid(options, defaults=None, columns=3, key_prefix="tg"):
-    """Render options as checkboxes in a grid; return list of selected option names."""
+    """Render options as checkboxes in a grid; returns list of selected option names (exact column names)."""
     defaults = set(defaults or [])
     sels = []
     cols = st.columns(columns)
     for i, opt in enumerate(options):
         with cols[i % columns]:
-            checked = st.checkbox(
-                opt.replace("Mechanic_", "").replace("Cat:", ""),
-                value=(opt in defaults),
-                key=f"{key_prefix}_{i}_{opt}"
-            )
+            label = opt.replace("Mechanic_", "").replace("Cat:", "")
+            checked = st.checkbox(label, value=(opt in defaults), key=f"{key_prefix}_{i}_{opt}")
             if checked:
                 sels.append(opt)
     return sels
+
+def toggle_feature(profile: dict, X_cols, on: bool, names):
+    """Flip a binary feature to 1 only if it exists in X_all."""
+    if not on:
+        return
+    if isinstance(names, str):
+        names = [names]
+    cols = set(X_cols)
+    for name in names:
+        if name in cols:
+            profile[name] = 1
+        else:
+            # try Mechanic_ prefix form
+            alt = f"Mechanic_{name.replace(' ', '_')}"
+            if alt in cols:
+                profile[alt] = 1
 
 
 def align_profile_to_training(profile: dict, training_cols: list[str], scaler=None) -> pd.DataFrame:
@@ -1279,26 +1292,46 @@ with tab_wizard:
                                                  ["Basic", "Standard", "Premium", "Deluxe"],
                                                  value="Standard")
         
-        st.markdown("#### Mechanics & Theme Selection")
         
-        mech_theme_cols = st.columns(2)
-        
-        with mech_theme_cols[0]:
-            st.markdown("#### Mechanics (toggle any)")
-            # Solo Mode toggle (model-safe → Min Players = 1)
-            solo_mode = st.checkbox("Solo Mode", value=(preset_data.get("min_players", 1) == 1), key="solo_mode_toggle")
+        # --- Mechanics & Themes (stacked in an expander) ---
+        with st.expander("Mechanics & Themes (toggle selections)", expanded=True):
+            # Mechanics first (Solo + Co-op live here)
+            st.markdown("##### Mechanics")
+            solo_mode = st.checkbox(
+                "Solo Mode",
+                value=(preset_data.get("min_players", 1) == 1),
+                key="solo_mode_toggle"
+            )
+            coop_toggle = st.checkbox(
+                "Co-op (team vs game)",
+                value=("Cooperative Game" in preset_data.get("mechs_on", [])),
+                key="coop_toggle"
+            )
         
             mech_all = discover_mechanics(X_all.columns)
-            mech_defaults = [m for m in preset_data.get("mechs_on", []) if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)]
-            # normalize defaults to actual column names present
-            mech_defaults = [m if m in mech_all else f"Mechanic_{m.replace(' ', '_')}" for m in mech_defaults if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)]
-            selected_mechanics = render_toggle_grid(mech_all, defaults=mech_defaults, columns=3, key_prefix="mech")
+            # Remove Co-op from the grid since it's its own toggle
+            mech_all = [m for m in mech_all if m not in {"Cooperative Game", "Mechanic_Cooperative_Game"}]
         
-        with mech_theme_cols[1]:
-            st.markdown("#### Themes & Categories (toggle any)")
+            mech_defaults = [
+                m if m in mech_all else f"Mechanic_{m.replace(' ', '_')}"
+                for m in preset_data.get("mechs_on", [])
+                if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)
+            ]
+            selected_mechanics = render_toggle_grid(
+                mech_all, defaults=mech_defaults, columns=3, key_prefix="mech"
+            )
+        
+            st.markdown("---")
+        
+            # Themes under Mechanics
+            st.markdown("##### Themes & Categories")
             theme_all = discover_themes(X_all.columns)
             theme_defaults = [c for c in preset_data.get("cats", []) if c in theme_all]
-            selected_themes = render_toggle_grid(theme_all, defaults=theme_defaults, columns=3, key_prefix="theme")
+            selected_themes = render_toggle_grid(
+                theme_all, defaults=theme_defaults, columns=3, key_prefix="theme"
+            )
+        # --- end expander ---
+
         
         st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
         
@@ -1343,15 +1376,18 @@ with tab_wizard:
         }
         
         # Add mechanics and themes
-        # Solo Mode → force Min Players = 1
+        # Solo Mode → force Min Players = 1 (model-safe)
         if solo_mode:
             profile["Min Players"] = 1
         
-        # Mechanics: set exact columns (already aligned to X_all)
+        # Co-op toggle → map to real column if present
+        toggle_feature(profile, X_all.columns, coop_toggle, "Cooperative Game")
+        
+        # Mechanics toggles (exact column names from grid)
         for m in selected_mechanics:
             profile[m] = 1
         
-        # Themes: set exact columns (already aligned to X_all)
+        # Themes toggles (exact column names from grid)
         for t in selected_themes:
             profile[t] = 1
         
@@ -2483,6 +2519,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
