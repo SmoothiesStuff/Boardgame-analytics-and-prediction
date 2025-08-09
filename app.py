@@ -811,7 +811,7 @@ with col6:
 # Enhanced tabs with more analysis
 tab_intel, tab_wizard, tab_trends, tab_segments, tab_synergies = st.tabs([
     "🎯 Market Intelligence",
-    "🚀 Design Wizard", 
+    "🧙‍♂️ Design Wizard", 
     "📈 Trend Analysis",
     "🗺️ Segment Explorer",
     "🔗 Mechanic Synergies"
@@ -914,7 +914,7 @@ with tab_intel:
 
 # Design Wizard Tab  
 with tab_wizard:
-    st.markdown("## 🚀 AI-Powered Game Design Wizard")
+    st.markdown("## 🧙‍♂️ AI-Powered Game Design Wizard")
     st.markdown("*Build your concept and receive market-validated predictions and recommendations*")
     
     # Archetype selection with insights
@@ -1853,5 +1853,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
