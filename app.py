@@ -1,5 +1,7 @@
 # streamlit_app.py — Enhanced Board Game Developer Console
 import os
+os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "poll")
+os.environ.setdefault("WATCHDOG_FORCE_POLLING", "true")
 import math
 from typing import Dict, List, Tuple
 import numpy as np
@@ -12,7 +14,6 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
 from joblib import load as joblib_load
-os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "poll")
 # Page config & theme
 st.set_page_config(page_title="Board Game Developer Console", page_icon="🎲", layout="wide")
 
@@ -450,6 +451,36 @@ def suggest_from_preset(df: pd.DataFrame, preset_key: str) -> Dict:
         "mechs_on": preset.get("mechs_on", []),
         "cats": preset.get("cats", []),
     }
+############ mechanics & themes helpers ############
+def get_mechanic_columns(df: pd.DataFrame) -> list[str]:
+    # capture both one-hot prefixed and common plain columns
+    base = [
+        "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
+        "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers",
+        "Hidden Roles", "Voting", "Pattern Building", "Area Majority / Influence",
+        "Network and Route Building", "Market", "Tech Trees / Tech Tracks", "Tile Placement"
+    ]
+    cols = [c for c in df.columns if c.startswith("Mechanic_")] + [c for c in base if c in df.columns]
+    # dedupe & sort nicely
+    seen, out = set(), []
+    for c in cols:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return sorted(out)
+
+def get_theme_columns(df: pd.DataFrame) -> list[str]:
+    base = ["Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"]
+    cols = [c for c in df.columns if c.startswith("Cat:")] + [c for c in base if c in df.columns]
+    seen, out = set(), []
+    for c in cols:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return sorted(out)
+
+def _is_on(series: pd.Series) -> pd.Series:
+    # treat 1/True as on; anything else off
+    return pd.to_numeric(series, errors="coerce").fillna(0).astype(float).eq(1.0) | series.astype(str).str.lower().isin(["true","yes"])
+    
 def _bucket_rating(x: float) -> str:
     if pd.isna(x): return ""
     if x >= 7.8: return "elite rated"
@@ -542,6 +573,9 @@ def generate_cluster_name(cluster_id: int, cluster_df: pd.DataFrame, overall_df:
 st.sidebar.title("🎲 Game Data Controls")
 uploaded = st.sidebar.file_uploader("Upload dataset (CSV or Parquet)", type=["csv", "parquet"])
 df = load_df(uploaded)
+# derive mechanic & theme options (once, from the loaded data)
+MECH_OPTIONS = get_mechanic_columns(df)
+THEME_OPTIONS = get_theme_columns(df)
 
 # Convert play time to hours for better scale handling
 def convert_play_time_to_hours(df):
@@ -562,8 +596,6 @@ weight_col = "GameWeight"
 min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
 
 # Convert play time to hours for filtering
-df_with_hours = convert_play_time_to_hours(df)
-ptime_col_hours = "Play Time Hours"
 min_t_hrs, max_t_hrs = 0.25, 6.0  # 15 minutes to 6 hours default range
 
 k = st.sidebar.slider("Number of clusters", 2, 15, 8, step=1)
@@ -575,6 +607,26 @@ wt_rng = st.sidebar.slider("Complexity range", float(math.floor(min_w)), float(m
 pt_rng_hrs = st.sidebar.slider("Play time range (hours)", 
                                min_t_hrs, max_t_hrs, (0.25, 5.0), step=0.25,
                                help="15 minute increments. Games over 6 hours are capped at 6.")
+# Players & age
+pl_min, pl_max = st.sidebar.slider(
+    "Player count (min to max)", 1, 12,
+    (int(df["Min Players"].min()) if "Min Players" in df else 1,
+     int(min(12, (df["Max Players"].max() if "Max Players" in df else 8)))),
+    help="Filters games whose player ranges intersect this range."
+)
+
+min_age_min = int(df["Min Age"].min()) if "Min Age" in df else 3
+min_age_max = int(df["Min Age"].max()) if "Min Age" in df else 18
+age_rng = st.sidebar.slider("Minimum age", min_age_min, min_age_max, (min_age_min, min(14, min_age_max)))
+
+# Mechanics & themes
+with st.sidebar.expander("Mechanics & Themes", expanded=False):
+    mech_match_mode = st.radio("Mechanics must match:", ["Any", "All"], horizontal=True)
+    selected_mechs_global = st.multiselect("Select mechanics", MECH_OPTIONS, default=[])
+    theme_match_mode = st.radio("Themes must match:", ["Any", "All"], horizontal=True, key="theme_match_mode")
+    selected_themes_global = st.multiselect("Select themes/categories", THEME_OPTIONS, default=[])
+
+st.sidebar.caption("These filters apply to the Analytics Dashboard, Cluster Map, and Cluster Explorer.")
 
 # Convert hour range back to minutes for filtering
 pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
@@ -596,13 +648,45 @@ mask = pd.Series(True, index=view.index)
 mask &= view[year_col].between(yr_rng[0], yr_rng[1])
 mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
 mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])  # Filter using original minutes
+# Player range intersection: keep games that overlap requested range
+if all(col in view.columns for col in ["Min Players", "Max Players"]):
+    # a game's [Min, Max] intersects the selected [pl_min, pl_max]
+    mask &= (view["Max Players"] >= pl_min) & (view["Min Players"] <= pl_max)
+
+# Minimum age
+if "Min Age" in view.columns:
+    mask &= view["Min Age"].between(age_rng[0], age_rng[1])
+
+# Mechanics filter
+if selected_mechs_global:
+    mech_masks = []
+    for m in selected_mechs_global:
+        if m in view.columns:
+            mech_masks.append(_is_on(view[m]))
+    if mech_masks:
+        mech_stack = pd.concat(mech_masks, axis=1)
+        mech_ok = mech_stack.any(axis=1) if mech_match_mode == "Any" else mech_stack.all(axis=1)
+        mask &= mech_ok
+
+# Themes filter
+if selected_themes_global:
+    theme_masks = []
+    for t in selected_themes_global:
+        if t in view.columns:
+            theme_masks.append(_is_on(view[t]))
+    if theme_masks:
+        theme_stack = pd.concat(theme_masks, axis=1)
+        theme_ok = theme_stack.any(axis=1) if theme_match_mode == "Any" else theme_stack.all(axis=1)
+        mask &= theme_ok
+
 view_f = view[mask].copy()
-# Build cluster name map for the current filtered view
-cluster_name_map = {cid: generate_cluster_name(cid, view_f[view_f["Cluster"] == cid], view_f)
-                    for cid in sorted(view_f["Cluster"].unique())}
 if view_f.empty:
     st.warning("No games match the current filters. Adjust the filters to see data.")
     st.stop()
+
+# Build cluster name map for the current filtered view
+cluster_name_map = {cid: generate_cluster_name(cid, view_f[view_f["Cluster"] == cid], view_f)
+                    for cid in sorted(view_f["Cluster"].unique())}
     
 # Header
 st.title("🎲 Board Game Developer Console")
@@ -1205,6 +1289,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
