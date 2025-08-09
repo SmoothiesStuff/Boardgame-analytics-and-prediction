@@ -504,47 +504,47 @@ with tab_dashboard:
         fig2 = create_year_vs_rating_chart(view_f)
         st.plotly_chart(fig2, use_container_width=True)
     
-        # Combined Analysis: Year vs Rating vs Complexity
-        st.markdown("### 📈 Market Evolution Over Time")
-        st.markdown("*Each bubble represents one year. Bigger bubbles = higher complexity games that year.*")
-        fig3 = create_bubble_chart(view_f)
-        st.plotly_chart(fig3, use_container_width=True)
-        
-        # Market insights
-        st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
-        st.markdown("### 🔍 Key Market Insights")
-        
-        # Calculate insights with better explanations
-        recent_games = view_f[view_f["Year Published"] >= 2020]
-        old_games = view_f[view_f["Year Published"] < 2000]
-        
-        insights_col1, insights_col2 = st.columns(2)
-        
-        with insights_col1:
-            st.markdown("**📈 Quality Evolution:**")
-            if len(recent_games) > 0 and len(old_games) > 0:
-                recent_avg = recent_games["BayesAvgRating"].mean()
-                old_avg = old_games["BayesAvgRating"].mean()
-                trend = "📈 Improving" if recent_avg > old_avg else "📉 Declining"
-                st.write(f"• Player ratings trend: **{trend}**")
-                st.write(f"• Modern games (2020+): **{recent_avg:.2f}** avg rating")
-                st.write(f"• Classic games (pre-2000): **{old_avg:.2f}** avg rating")
-        
-        with insights_col2:
-            st.markdown("**🎯 Complexity Evolution:**")
-            if len(recent_games) > 0:
-                recent_complexity = recent_games["GameWeight"].mean()
-                overall_complexity = view_f["GameWeight"].mean()
-                st.write(f"• Modern complexity: **{recent_complexity:.1f}** (1-5 scale)")
-                st.write(f"• Historical average: **{overall_complexity:.1f}**")
-                if recent_complexity > overall_complexity + 0.2:
-                    st.write("• **Trend: Games getting more complex** 🧩")
-                elif recent_complexity < overall_complexity - 0.2:
-                    st.write("• **Trend: Games getting simpler** 🎯")
-                else:
-                    st.write("• **Trend: Complexity stable** ⚖️")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+    # Combined Analysis: Year vs Rating vs Complexity
+    st.markdown("### 📈 Market Evolution Over Time")
+    st.markdown("*Each bubble represents one year. Bigger bubbles = higher complexity games that year.*")
+    fig3 = create_bubble_chart(view_f)
+    st.plotly_chart(fig3, use_container_width=True)
+    
+    # Market insights
+    st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
+    st.markdown("### 🔍 Key Market Insights")
+    
+    # Calculate insights with better explanations
+    recent_games = view_f[view_f["Year Published"] >= 2020]
+    old_games = view_f[view_f["Year Published"] < 2000]
+    
+    insights_col1, insights_col2 = st.columns(2)
+    
+    with insights_col1:
+        st.markdown("**📈 Quality Evolution:**")
+        if len(recent_games) > 0 and len(old_games) > 0:
+            recent_avg = recent_games["BayesAvgRating"].mean()
+            old_avg = old_games["BayesAvgRating"].mean()
+            trend = "📈 Improving" if recent_avg > old_avg else "📉 Declining"
+            st.write(f"• Player ratings trend: **{trend}**")
+            st.write(f"• Modern games (2020+): **{recent_avg:.2f}** avg rating")
+            st.write(f"• Classic games (pre-2000): **{old_avg:.2f}** avg rating")
+    
+    with insights_col2:
+        st.markdown("**🎯 Complexity Evolution:**")
+        if len(recent_games) > 0:
+            recent_complexity = recent_games["GameWeight"].mean()
+            overall_complexity = view_f["GameWeight"].mean()
+            st.write(f"• Modern complexity: **{recent_complexity:.1f}** (1-5 scale)")
+            st.write(f"• Historical average: **{overall_complexity:.1f}**")
+            if recent_complexity > overall_complexity + 0.2:
+                st.write("• **Trend: Games getting more complex** 🧩")
+            elif recent_complexity < overall_complexity - 0.2:
+                st.write("• **Trend: Games getting simpler** 🎯")
+            else:
+                st.write("• **Trend: Complexity stable** ⚖️")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
             overall_complexity = view_f["GameWeight"].mean()
             st.write(f"• Recent games complexity: {recent_complexity:.2f}")
             st.write(f"• Overall average: {overall_complexity:.2f}")
