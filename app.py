@@ -1,5 +1,5 @@
-# streamlit_app.py — Profile Wizard, auto-estimation, predictions & neighbors
-# Parquet-first + earth-tone visuals + interactive UX
+# streamlit_app.py — Enhanced Board Game Developer Console
+# Analytics Dashboard + Improved Profile Wizard + Neighbor Analysis
 
 import os
 import math
@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -18,15 +19,19 @@ from sklearn.metrics import pairwise_distances
 from joblib import load as joblib_load
 
 # ---------------------------------
-# Page config & theme-friendly CSS
+# Page config & enhanced earth-tone theme
 # ---------------------------------
 st.set_page_config(page_title="Board Game Developer Console", page_icon="🎲", layout="wide")
 
 PALETTE = [
-    "#5A6A62", "#A67C52", "#7C8C4A", "#C4A484", "#4F4538",
-    "#B56576", "#6B705C", "#D4A373", "#8D6B94", "#708090",
+    "#8B7355", "#A67C52", "#7C8C4A", "#C4A484", "#4F4538",
+    "#B56576", "#6B705C", "#D4A373", "#8D6B94", "#9C8B7A",
+    "#6B5B73", "#8A7968", "#A68B5B", "#7A8B8B", "#8B7D6B"
 ]
-ACCENT = "#A67C52"; MUTED = "#5A6A62"; BG_SOFT = "#FAF7F2"
+ACCENT = "#A67C52"
+MUTED = "#6B705C" 
+BG_SOFT = "#FAF7F2"
+CHART_BG = "#FFFCF7"
 
 st.markdown(
     f"""
@@ -34,36 +39,57 @@ st.markdown(
       .stApp {{ background-color: {BG_SOFT}; }}
       section[data-testid="stSidebar"] {{ background-color: #F3EFE7; }}
       h1, h2, h3, h4 {{ color: {ACCENT}; }}
-      .earthcard {{ border: 1px solid #e5dcc9; border-radius: 12px; padding: .75rem 1rem; background: #FFFCF7; }}
+      .earthcard {{ 
+        border: 1px solid #e5dcc9; 
+        border-radius: 12px; 
+        padding: 1rem; 
+        background: {CHART_BG}; 
+        margin: 0.5rem 0;
+      }}
+      .metric-card {{
+        background: {CHART_BG};
+        padding: 0.75rem;
+        border-radius: 8px;
+        border-left: 4px solid {ACCENT};
+        margin: 0.25rem 0;
+      }}
+      .prediction-card {{
+        background: linear-gradient(135deg, {CHART_BG} 0%, #F5F1EA 100%);
+        padding: 1.25rem;
+        border-radius: 12px;
+        border: 1px solid #E5DCC9;
+        margin: 1rem 0;
+      }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------
-# Paths & feature config
+# Enhanced configuration
 # ---------------------------------
 DEFAULT_PARQUET_PATH = "cleaned_large_bgg_dataset.parquet"
-DEFAULT_CSV_PATH     = "cleaned_large_bgg_dataset.csv"
+DEFAULT_CSV_PATH = "cleaned_large_bgg_dataset.csv"
 
 EXCLUDE_FOR_CLUSTERING = [
-    "Owned Users", "LogOwned", "BayesAvgRating", "SalesPercentile",
-    "Users Rated", "BGG Rank", "StdDev",
-    "ID", "BGGId", "Name", "Description", "ImagePath"
+    "Owned Users", "BayesAvgRating", "AvgRating", "Users Rated", "BGG Rank", 
+    "StdDev", "NumWant", "NumWish", "NumComments", "NumWeightVotes",
+    "ID", "BGGId", "Name", "ImagePath", "Rank:strategygames", "Rank:abstracts", 
+    "Rank:familygames", "Rank:thematic", "Rank:cgs", "Rank:wargames", 
+    "Rank:partygames", "Rank:childrensgames"
 ]
-ALWAYS_NUMERIC_DEFAULT_ZERO = True
 
 MODEL_PATHS = {
     "rating_rf": "models/rating_rf.joblib",
-    "rating_xgb": "models/rating_xgb.joblib",
-    "sales_rf":  "models/sales_rf.joblib",
+    "rating_xgb": "models/rating_xgb.joblib", 
+    "sales_rf": "models/sales_rf.joblib",
     "sales_xgb": "models/sales_xgb.joblib",
 }
 
-CURRENT_YEAR = 2025  # assume current year when not provided
+CURRENT_YEAR = 2025
 
 # ---------------------------------
-# Data loading & utils
+# Enhanced data loading & utils
 # ---------------------------------
 @st.cache_data(show_spinner=True)
 def load_df(uploaded_file) -> pd.DataFrame:
@@ -86,17 +112,16 @@ def load_df(uploaded_file) -> pd.DataFrame:
 def split_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     X = df.drop(columns=[c for c in EXCLUDE_FOR_CLUSTERING if c in df.columns], errors="ignore")
     X = X.select_dtypes(include=["number"])
-    if ALWAYS_NUMERIC_DEFAULT_ZERO:
-        X = X.fillna(0)
+    X = X.fillna(0)
     keep_cols = [c for c in df.columns if c not in X.columns]
-    if "Name" in df.columns: keep_cols = list(dict.fromkeys(keep_cols + ["Name"]))
+    if "Name" in df.columns: 
+        keep_cols = list(dict.fromkeys(keep_cols + ["Name"]))
     meta = df[keep_cols].copy()
     return X, meta
 
 @st.cache_resource(show_spinner=False)
 def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
     if len(X) < k:
-        st.warning("k is larger than the number of rows; reducing k.")
         k = max(2, len(X))
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -155,21 +180,145 @@ def predict_with_models(models: Dict, X_input_df: pd.DataFrame) -> Dict[str, flo
             out[key] = None
     return out
 
-def rf_confidence_std(model, X_input_df: pd.DataFrame):
-    try:
-        ests = getattr(model, "estimators_", None)
-        if ests is None:
-            return None
-        preds = np.column_stack([est.predict(X_input_df) for est in ests])
-        return float(np.std(preds, axis=1)[0])
-    except Exception:
-        return None
+# ---------------------------------
+# Enhanced visualization functions
+# ---------------------------------
+def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
+    """Create complexity vs rating scatter plot"""
+    fig = go.Figure()
+    
+    # Main data points
+    fig.add_trace(go.Scatter(
+        x=df_filtered["GameWeight"],
+        y=df_filtered["BayesAvgRating"], 
+        mode='markers',
+        marker=dict(size=6, color=MUTED, opacity=0.6),
+        text=df_filtered["Name"],
+        hovertemplate="<b>%{text}</b><br>Complexity: %{x:.1f}<br>Rating: %{y:.2f}<extra></extra>",
+        name="All Games",
+        showlegend=True
+    ))
+    
+    # Highlight neighbors if provided
+    if highlight_neighbors is not None and len(highlight_neighbors) > 0:
+        fig.add_trace(go.Scatter(
+            x=highlight_neighbors["GameWeight"],
+            y=highlight_neighbors["BayesAvgRating"],
+            mode='markers',
+            marker=dict(size=10, color=ACCENT, opacity=0.9, line=dict(width=2, color='white')),
+            text=highlight_neighbors["Name"],
+            hovertemplate="<b>%{text}</b><br>Complexity: %{x:.1f}<br>Rating: %{y:.2f}<extra></extra>",
+            name="Similar Games",
+            showlegend=True
+        ))
+    
+    fig.update_layout(
+        title="Game Complexity vs Rating",
+        xaxis_title="Complexity (GameWeight)",
+        yaxis_title="Bayes Average Rating",
+        plot_bgcolor=CHART_BG,
+        paper_bgcolor=CHART_BG,
+        height=400,
+        font_color=MUTED
+    )
+    return fig
+
+def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
+    """Create year vs rating scatter plot"""
+    fig = go.Figure()
+    
+    # Main data points
+    fig.add_trace(go.Scatter(
+        x=df_filtered["Year Published"],
+        y=df_filtered["BayesAvgRating"],
+        mode='markers',
+        marker=dict(size=6, color=MUTED, opacity=0.6),
+        text=df_filtered["Name"],
+        hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>",
+        name="All Games",
+        showlegend=True
+    ))
+    
+    # Highlight neighbors if provided
+    if highlight_neighbors is not None and len(highlight_neighbors) > 0:
+        fig.add_trace(go.Scatter(
+            x=highlight_neighbors["Year Published"],
+            y=highlight_neighbors["BayesAvgRating"],
+            mode='markers',
+            marker=dict(size=10, color=ACCENT, opacity=0.9, line=dict(width=2, color='white')),
+            text=highlight_neighbors["Name"],
+            hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>",
+            name="Similar Games",
+            showlegend=True
+        ))
+    
+    fig.update_layout(
+        title="Publication Year vs Rating",
+        xaxis_title="Year Published",
+        yaxis_title="Bayes Average Rating",
+        plot_bgcolor=CHART_BG,
+        paper_bgcolor=CHART_BG,
+        height=400,
+        font_color=MUTED
+    )
+    return fig
+
+def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
+    """Create year vs rating bubble chart with complexity as size"""
+    fig = go.Figure()
+    
+    # Main data points
+    fig.add_trace(go.Scatter(
+        x=df_filtered["Year Published"],
+        y=df_filtered["BayesAvgRating"],
+        mode='markers',
+        marker=dict(
+            size=df_filtered["GameWeight"] * 8 + 5,  # Scale complexity for visibility
+            color=MUTED,
+            opacity=0.5,
+            line=dict(width=1, color='white')
+        ),
+        text=df_filtered["Name"],
+        customdata=df_filtered["GameWeight"],
+        hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<br>Complexity: %{customdata:.1f}<extra></extra>",
+        name="All Games",
+        showlegend=True
+    ))
+    
+    # Highlight neighbors if provided
+    if highlight_neighbors is not None and len(highlight_neighbors) > 0:
+        fig.add_trace(go.Scatter(
+            x=highlight_neighbors["Year Published"],
+            y=highlight_neighbors["BayesAvgRating"],
+            mode='markers',
+            marker=dict(
+                size=highlight_neighbors["GameWeight"] * 8 + 10,
+                color=ACCENT,
+                opacity=0.9,
+                line=dict(width=2, color='white')
+            ),
+            text=highlight_neighbors["Name"],
+            customdata=highlight_neighbors["GameWeight"],
+            hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<br>Complexity: %{customdata:.1f}<extra></extra>",
+            name="Similar Games",
+            showlegend=True
+        ))
+    
+    fig.update_layout(
+        title="Year vs Rating (Bubble Size = Complexity)",
+        xaxis_title="Year Published",
+        yaxis_title="Bayes Average Rating",
+        plot_bgcolor=CHART_BG,
+        paper_bgcolor=CHART_BG,
+        height=500,
+        font_color=MUTED
+    )
+    return fig
 
 # ---------------------------------
-# Smart presets / estimation helpers
+# Enhanced profile presets
 # ---------------------------------
 PROFILE_PRESETS = {
-    # high-level presets mapped to your columns (cat/mech toggles + typical ranges)
     "Family Party": {
         "cats": ["Cat:Family", "Cat:Party"],
         "mechs_on": ["Set Collection", "Hand Management", "Voting", "Take That"],
@@ -180,40 +329,30 @@ PROFILE_PRESETS = {
         "mechs_on": ["Cooperative Game", "Action Points", "Variable Player Powers"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4, "play_time": 60, "min_age": 12, "weight": 2.6
     },
-    "Heavy Euro (Economic)": {
+    "Heavy Euro": {
         "cats": ["Cat:Strategy", "Economic"],
         "mechs_on": ["Network and Route Building", "Market", "Tech Trees / Tech Tracks", "Worker Placement"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4, "play_time": 120, "min_age": 14, "weight": 3.6
     },
     "Thematic Adventure": {
         "cats": ["Cat:Thematic", "Adventure", "Fantasy"],
-        "mechs_on": ["Dice Rolling", "Tile Placement", "Campaign / Battle Card Driven"],
+        "mechs_on": ["Dice Rolling", "Tile Placement", "Variable Player Powers"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4, "play_time": 90, "min_age": 12, "weight": 2.7
     },
-    "Abstract Duel": {
+    "Abstract Strategy": {
         "cats": ["Cat:Abstract"],
-        "mechs_on": ["Grid Movement", "Pattern Building"],
+        "mechs_on": ["Grid Movement", "Pattern Building", "Area Majority / Influence"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 2, "play_time": 20, "min_age": 10, "weight": 2.0
-    },
-    "Wargame (Operational)": {
-        "cats": ["Cat:War", "Theme_War"],
-        "mechs_on": ["Hexagon Grid", "Zone of Control", "Campaign / Battle Card Driven"],
-        "year": CURRENT_YEAR, "min_players": 2, "max_players": 2, "play_time": 180, "min_age": 14, "weight": 3.5
     },
     "Deckbuilder": {
         "cats": ["Cat:CGS"],
-        "mechs_on": ["Deck Construction", "Card Drafting", "TableauBuilding"],
+        "mechs_on": ["Deck Construction", "Hand Management", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4, "play_time": 45, "min_age": 10, "weight": 2.3
     },
     "Social Deduction": {
-        "cats": ["Cat:Party", "Hidden Roles"],
-        "mechs_on": ["Hidden Roles", "Voting", "Betting and Bluffing"],
+        "cats": ["Cat:Party"],
+        "mechs_on": ["Hidden Roles", "Voting", "Player Elimination"],
         "year": CURRENT_YEAR, "min_players": 5, "max_players": 10, "play_time": 20, "min_age": 10, "weight": 1.7
-    },
-    "Solo Puzzler": {
-        "cats": ["Domain_Abstract Games"],
-        "mechs_on": ["Solo / Solitaire Game", "Pattern Recognition"],
-        "year": CURRENT_YEAR, "min_players": 1, "max_players": 1, "play_time": 30, "min_age": 10, "weight": 2.2
     },
 }
 
@@ -224,13 +363,12 @@ def median_if_available(df: pd.DataFrame, col: str, mask=None, default=None):
     return float(data.median()) if len(data) else default
 
 def suggest_from_preset(df: pd.DataFrame, preset_key: str) -> Dict:
-    """Use preset priors, then refine with dataset medians within category mask if present."""
     preset = PROFILE_PRESETS.get(preset_key, {})
     mask = pd.Series(True, index=df.index)
     for cat in preset.get("cats", []):
         if cat in df.columns:
             mask &= (df[cat] == 1) | (df[cat] == True)
-    # refined suggestions using medians
+    
     return {
         "Year Published": preset.get("year", CURRENT_YEAR),
         "Min Players": int(round(median_if_available(df, "Min Players", mask, preset.get("min_players", 2)) or 2)),
@@ -243,33 +381,31 @@ def suggest_from_preset(df: pd.DataFrame, preset_key: str) -> Dict:
     }
 
 # ---------------------------------
-# Sidebar — data & filters
+# Sidebar setup
 # ---------------------------------
-st.sidebar.title("Data & Settings")
+st.sidebar.title("🎲 Game Data Controls")
 uploaded = st.sidebar.file_uploader("Upload dataset (CSV or Parquet)", type=["csv", "parquet"])
 df = load_df(uploaded)
 
+# Sidebar filters
 st.sidebar.markdown("---")
-year_col = "Year Published" if "Year Published" in df.columns else None
-min_year, max_year = (int(df[year_col].min()), int(df[year_col].max())) if year_col else (2010, CURRENT_YEAR)
+year_col = "Year Published"
+min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
+weight_col = "GameWeight"
+min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
+ptime_col = "Play Time"
+min_t, max_t = int(df[ptime_col].min()), int(df[ptime_col].max())
 
-weight_col = "GameWeight" if "GameWeight" in df.columns else None
-min_w, max_w = (float(df[weight_col].min()), float(df[weight_col].max())) if weight_col else (1.0, 5.0)
-
-ptime_col = "Play Time" if "Play Time" in df.columns else None
-min_t, max_t = (int(df[ptime_col].min()), int(df[ptime_col].max())) if ptime_col else (10, 240)
-
-k = st.sidebar.slider("K (clusters)", 2, 15, 8, step=1)
+k = st.sidebar.slider("Number of clusters", 2, 15, 8, step=1)
 topn = st.sidebar.slider("Nearest neighbors to show", 3, 30, 10, step=1)
 
-st.sidebar.subheader("Filters")
-yr_rng = st.sidebar.slider("Year range", min_year, max_year, (min(max(min_year, 2010), max_year), max_year))
-wt_rng = st.sidebar.slider("Complexity (weight)", float(math.floor(min_w)), float(math.ceil(max_w)), (max(1.0, min_w), min(5.0, max_w)))
-pt_rng = st.sidebar.slider("Play time (min)", min_t, max_t, (min_t, max_t))
-st.sidebar.caption("Tip: Include models in ./models for predictions. Parquet runs fastest.")
+st.sidebar.subheader("Data Filters")
+yr_rng = st.sidebar.slider("Year range", min_year, max_year, (max(min_year, 2010), max_year))
+wt_rng = st.sidebar.slider("Complexity range", float(math.floor(min_w)), float(math.ceil(max_w)), (max(1.0, min_w), min(5.0, max_w)))
+pt_rng = st.sidebar.slider("Play time range (min)", min_t, max_t, (min_t, max_t))
 
 # ---------------------------------
-# Cluster prep
+# Prepare clustering data
 # ---------------------------------
 X_all, meta = split_features(df)
 scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
@@ -279,128 +415,170 @@ view["Cluster"] = labels
 view["PCA1"] = coords[:, 0]
 view["PCA2"] = coords[:, 1]
 
+# Apply filters
 mask = pd.Series(True, index=view.index)
-if year_col:  mask &= view[year_col].between(yr_rng[0], yr_rng[1])
-if weight_col: mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
-if ptime_col:  mask &= view[ptime_col].between(pt_rng[0], pt_rng[1])
+mask &= view[year_col].between(yr_rng[0], yr_rng[1])
+mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
+mask &= view[ptime_col].between(pt_rng[0], pt_rng[1])
 view_f = view[mask].copy()
 
 # ---------------------------------
-# Header & KPIs
+# Header
 # ---------------------------------
-st.title("Board Game Developer Console")
-st.write("Choose a **profile type**, let the app **estimate missing fields**, then get a **prediction** and **nearest neighbors** with an easy-to-read analysis.")
+st.title("🎲 Board Game Developer Console")
+st.markdown("**Analyze market trends, test game concepts, and discover opportunities in the board game space**")
 
-c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("Games in view", f"{len(view_f):,}")
-with c2: st.metric("Clusters", f"{len(np.unique(labels))}")
-with c3:
-    st.metric("Median Bayes rating", f"{float(view_f['BayesAvgRating'].median()):.2f}" if "BayesAvgRating" in view_f.columns else "n/a")
-with c4:
-    st.metric("Median owners", f"{int(view_f['Owned Users'].median()):,}" if "Owned Users" in view_f.columns else "n/a")
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+    st.markdown('<div class="metric-card"><h4>📊 Games in View</h4><h2>' + f"{len(view_f):,}" + '</h2></div>', unsafe_allow_html=True)
+with col2:
+    st.markdown('<div class="metric-card"><h4>🎯 Clusters</h4><h2>' + f"{len(np.unique(labels))}" + '</h2></div>', unsafe_allow_html=True)
+with col3:
+    median_rating = float(view_f['BayesAvgRating'].median())
+    st.markdown('<div class="metric-card"><h4>⭐ Median Rating</h4><h2>' + f"{median_rating:.2f}" + '</h2></div>', unsafe_allow_html=True)
+with col4:
+    median_owners = int(view_f['Owned Users'].median())
+    st.markdown('<div class="metric-card"><h4>👥 Median Owners</h4><h2>' + f"{median_owners:,}" + '</h2></div>', unsafe_allow_html=True)
+with col5:
+    median_complexity = float(view_f['GameWeight'].median())
+    st.markdown('<div class="metric-card"><h4>🧩 Median Complexity</h4><h2>' + f"{median_complexity:.1f}" + '</h2></div>', unsafe_allow_html=True)
 
 # ---------------------------------
-# Tabs
+# Main tabs
 # ---------------------------------
-tab_map, tab_concept, tab_explore = st.tabs(["🗺️ Cluster Map", "🧙 Profile Wizard + Concept", "🔭 Cluster Explorer"])
+tab_dashboard, tab_wizard, tab_map, tab_explore = st.tabs([
+    "📈 Analytics Dashboard", 
+    "🧙‍♂️ Profile Wizard", 
+    "🗺️ Cluster Map", 
+    "🔭 Cluster Explorer"
+])
 
-# -----------------
-# Map
-# -----------------
-with tab_map:
-    st.subheader("📌 PCA Projection")
-    color_by_opts = ["Cluster"] + ([year_col] if year_col else [])
-    color_by = st.selectbox("Color by", color_by_opts, index=0, key="colorby_map")
-    hover_cols = [c for c in ["Name", year_col, "BayesAvgRating", "Owned Users", weight_col, ptime_col] if c and c in view_f.columns]
-
-    fig = px.scatter(view_f, x="PCA1", y="PCA2", color=color_by,
-                     color_discrete_sequence=PALETTE, hover_data=hover_cols,
-                     height=580, title=f"PCA Projection (k={k})")
-    fig.update_traces(marker=dict(size=8, opacity=0.85))
-    fig.update_layout(margin=dict(l=10, r=10, t=60, b=10))
-
-    if len(view_f) > 50:
-        fig2 = px.density_contour(view_f, x="PCA1", y="PCA2", color_discrete_sequence=["#8c7a64"])
-        for tr in fig2.data:
-            tr.update(opacity=0.25)
-            fig.add_trace(tr)
-    st.plotly_chart(fig, use_container_width=True)
-
+# ---------------------------------
+# Analytics Dashboard Tab
+# ---------------------------------
+with tab_dashboard:
+    st.subheader("📈 Market Analytics Dashboard")
+    st.markdown("Explore key relationships in the board game market")
+    
+    # Create the three main charts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig1 = create_complexity_vs_rating_chart(view_f)
+        st.plotly_chart(fig1, use_container_width=True)
+        
+    with col2:
+        fig2 = create_year_vs_rating_chart(view_f)
+        st.plotly_chart(fig2, use_container_width=True)
+    
+    # Bubble chart spanning full width
+    st.markdown("### Combined Analysis: Year vs Rating vs Complexity")
+    fig3 = create_bubble_chart(view_f)
+    st.plotly_chart(fig3, use_container_width=True)
+    
+    # Market insights
     st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
-    cols = st.columns(2)
-    if "Owned Users" in view_f.columns:
-        owners = view_f.groupby("Cluster")["Owned Users"].median().reset_index().rename(columns={"Owned Users":"Median Owners"})
-        b1 = px.bar(owners, x="Cluster", y="Median Owners", color="Cluster", color_discrete_sequence=PALETTE, height=320, title="Cluster median owners")
-        b1.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10))
-        cols[0].plotly_chart(b1, use_container_width=True)
-    if "BayesAvgRating" in view_f.columns:
-        rating = view_f.groupby("Cluster")["BayesAvgRating"].median().reset_index().rename(columns={"BayesAvgRating":"Median Rating"})
-        b2 = px.bar(rating, x="Cluster", y="Median Rating", color="Cluster", color_discrete_sequence=PALETTE, height=320, title="Cluster median rating")
-        b2.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10))
-        cols[1].plotly_chart(b2, use_container_width=True)
+    st.markdown("### 📊 Market Insights")
+    
+    # Calculate some insights
+    recent_games = view_f[view_f["Year Published"] >= 2020]
+    old_games = view_f[view_f["Year Published"] < 2010]
+    
+    insights_col1, insights_col2 = st.columns(2)
+    
+    with insights_col1:
+        st.markdown("**Quality Trends:**")
+        if len(recent_games) > 0 and len(old_games) > 0:
+            recent_avg = recent_games["BayesAvgRating"].mean()
+            old_avg = old_games["BayesAvgRating"].mean()
+            trend = "📈 Rising" if recent_avg > old_avg else "📉 Declining"
+            st.write(f"• Rating trend (2020+ vs pre-2010): {trend}")
+            st.write(f"• Recent average: {recent_avg:.2f}")
+            st.write(f"• Historical average: {old_avg:.2f}")
+    
+    with insights_col2:
+        st.markdown("**Complexity Trends:**")
+        if len(recent_games) > 0:
+            recent_complexity = recent_games["GameWeight"].mean()
+            overall_complexity = view_f["GameWeight"].mean()
+            st.write(f"• Recent games complexity: {recent_complexity:.2f}")
+            st.write(f"• Overall average: {overall_complexity:.2f}")
+            if recent_complexity > overall_complexity:
+                st.write("• Trend: Games getting more complex 🧩")
+            else:
+                st.write("• Trend: Games getting simpler 🎯")
+    
     st.markdown("</div>", unsafe_allow_html=True)
 
-# -----------------
-# Profile Wizard + Concept
-# -----------------
-with tab_concept:
-    st.subheader("🧙 Profile Wizard")
+# ---------------------------------
+# Enhanced Profile Wizard Tab
+# ---------------------------------
+with tab_wizard:
+    st.subheader("🧙‍♂️ Game Profile Wizard")
+    st.markdown("Design your game concept and get AI-powered predictions and market analysis")
 
-    left_wiz, right_wiz = st.columns([1.1, 1])
+    # Profile selection
+    left_wiz, right_wiz = st.columns([1.2, 1])
     with left_wiz:
-        preset_key = st.selectbox("Choose a game profile", list(PROFILE_PRESETS.keys()), index=1)
+        preset_key = st.selectbox("Choose a game archetype", list(PROFILE_PRESETS.keys()), index=1)
         auto = suggest_from_preset(df, preset_key)
 
     with right_wiz:
-        st.caption("Preset categories & mechanics toggled on by default")
-        st.write("**Categories:**", ", ".join(auto["cats"]) if auto["cats"] else "—")
-        st.write("**Mechanics:**", ", ".join(auto["mechs_on"]) if auto["mechs_on"] else "—")
+        st.markdown("**🎯 Preset Details**")
+        st.write("**Categories:** " + (", ".join(auto["cats"]) if auto["cats"] else "None specified"))
+        st.write("**Key Mechanics:** " + (", ".join(auto["mechs_on"]) if auto["mechs_on"] else "None specified"))
 
-    st.markdown("### Enter details (we’ll **estimate** any you skip)")
-    with st.form("concept_form"):
+    # Game details form
+    st.markdown("### 🎮 Game Details")
+    st.markdown("*Fill in what you know - we'll estimate the rest based on similar games*")
+    
+    with st.form("enhanced_concept_form"):
+        # Basic stats
         c1, c2, c3, c4 = st.columns(4)
-        year_published = c1.number_input("Year Published", value=int(auto["Year Published"]), step=1, help="Defaults to current year if empty")
-        min_players   = c2.number_input("Min Players", value=int(auto["Min Players"]), step=1)
-        max_players   = c3.number_input("Max Players", value=int(auto["Max Players"]), step=1)
-        play_time     = c4.number_input("Play Time (min)", value=int(auto["Play Time"]), step=5)
+        year_published = c1.number_input("Year Published", value=int(auto["Year Published"]), step=1)
+        min_players = c2.number_input("Min Players", value=int(auto["Min Players"]), step=1)
+        max_players = c3.number_input("Max Players", value=int(auto["Max Players"]), step=1)
+        play_time = c4.number_input("Play Time (min)", value=int(auto["Play Time"]), step=5)
 
         c5, c6, c7, c8 = st.columns(4)
-        min_age   = c5.number_input("Min Age", value=int(auto["Min Age"]), step=1)
-        weight    = c6.number_input("Complexity (GameWeight)", value=float(auto["GameWeight"]), step=0.1, format="%.1f")
-        kickstarted = c7.selectbox("Kickstarted", ["No", "Yes"], index=0)
-        best_players= c8.number_input("BestPlayers (if known, else 0)", value=0, step=1)
+        min_age = c5.number_input("Min Age", value=int(auto["Min Age"]), step=1)
+        weight = c6.number_input("Complexity (1-5)", value=float(auto["GameWeight"]), step=0.1, format="%.1f")
+        kickstarted = c7.selectbox("Kickstarted?", ["No", "Yes"], index=0)
+        best_players = c8.number_input("Best Player Count", value=0, step=1, help="Leave 0 if unknown")
 
+        # Mechanics and themes
         X_cols = list(X_all.columns)
         mech_cols = sorted([c for c in X_cols if c.startswith("Mechanic_") or c in [
-            "Deck Construction","Card Drafting","TableauBuilding","Worker Placement","Hidden Roles",
-            "Cooperative Game","Variable Player Powers","Dice Rolling","Tile Placement","Network and Route Building"
-        ]])
-        theme_cols = sorted([c for c in X_cols if c.startswith("Theme_") or c in [
-            "Fantasy","Adventure","Horror","Science Fiction","Space Exploration","Animals","Sports",
-            "Economic","Environmental","Civilization","War","Thematic","Strategy"
-        ] or c.startswith("Cat:")])
+            "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
+            "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers"
+        ]][:50])  # Limit for UI
+        
+        theme_cols = sorted([c for c in X_cols if c.startswith("Cat:") or c in [
+            "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"
+        ]][:30])  # Limit for UI
 
-        st.markdown("**Select mechanics and themes (optional):**")
+        st.markdown("### 🔧 Mechanics & Themes")
         m1, m2 = st.columns(2)
-        selected_mechs = m1.multiselect("Mechanics", mech_cols[:120], default=[m for m in auto["mechs_on"] if m in mech_cols])
-        selected_themes= m2.multiselect("Themes/Categories", theme_cols[:120], default=[t for t in auto["cats"] if t in theme_cols])
+        
+        selected_mechs = m1.multiselect(
+            "🔧 Select Key Mechanics", 
+            mech_cols, 
+            default=[m for m in auto["mechs_on"] if m in mech_cols],
+            help="Choose the main mechanics that define your game"
+        )
+        
+        selected_themes = m2.multiselect(
+            "🎨 Select Themes/Categories", 
+            theme_cols, 
+            default=[t for t in auto["cats"] if t in theme_cols],
+            help="Choose themes and categories that best describe your game"
+        )
 
-        # Optional numeric fields
-        st.markdown("**Optional numeric fields:** (leave blank for 0)")
-        adv_cols = [
-            "ComAgeRec","LanguageEase","NumWant","NumWish",
-            "MfgPlaytime","ComMinPlaytime","ComMaxPlaytime","MfgAgeRec",
-            "NumAlternates","NumExpansions","NumImplementations","IsReimplementation",
-        ]
-        adv_vals = {}
-        a1, a2, a3, a4 = st.columns(4)
-        for i, col in enumerate(adv_cols):
-            adv_vals[col] = [a1, a2, a3, a4][i % 4].number_input(col, value=0, step=1)
+        submitted = st.form_submit_button("🚀 Analyze Game Concept", type="primary")
 
-        submitted = st.form_submit_button("Analyze Concept")
-
+    # Analysis results
     if submitted:
-        # Build profile and auto-fill any missing with sensible estimates (medians within preset mask)
+        # Build profile
         profile = {
             "Year Published": year_published or CURRENT_YEAR,
             "Min Players": min_players or auto["Min Players"],
@@ -411,171 +589,366 @@ with tab_concept:
             "Kickstarted": 1 if kickstarted == "Yes" else 0,
             "BestPlayers": best_players or 0,
         }
-        profile.update(adv_vals)
 
-        # turn on mechanics/themes
+        # Add mechanics and themes
         for m in set(selected_mechs + auto["mechs_on"]):
-            profile[m] = 1
+            if m in X_cols:
+                profile[m] = 1
         for t in set(selected_themes + auto["cats"]):
-            profile[t] = 1
+            if t in X_cols:
+                profile[t] = 1
 
-        # Align to training feature set
+        # Create input vector
         x_input = build_input_vector(X_cols, profile)
-
-        # Cluster assignment
         x_scaled = scaler.transform(x_input)
         assigned_cluster = int(kmeans.predict(x_scaled)[0])
 
-        # Neighbors
+        # Get neighbors
         neighbors = nearest_neighbors_in_cluster(
             x_scaled, assigned_cluster, view, X_all, scaler, kmeans, topn=topn
         )
 
-        # Neighbor summary table
-        rows = []
-        has_year = year_col is not None
-        for _, r in neighbors.iterrows():
-            yr = int(r.get(year_col, 0)) if has_year else 0
-            same_year = view[view[year_col] == yr] if has_year else pd.DataFrame()
+        # Create enhanced neighbor analysis
+        st.markdown("---")
+        st.markdown("## 🎯 Concept Analysis Results")
+        
+        # Prediction section
+        st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+        st.markdown("### 🔮 AI Predictions")
+        
+        models = load_models(MODEL_PATHS)
+        if models:
+            preds = predict_with_models(models, x_input)
+            
+            pred_col1, pred_col2 = st.columns(2)
+            with pred_col1:
+                st.markdown("**📊 Rating Predictions**")
+                rrf = preds.get("rating_rf")
+                rxg = preds.get("rating_xgb")
+                if rrf is not None:
+                    st.metric("Random Forest Rating", f"{rrf:.2f}", help="Predicted BGG rating")
+                if rxg is not None:
+                    st.metric("XGBoost Rating", f"{rxg:.2f}", help="Alternative rating prediction")
+                    
+            with pred_col2:
+                st.markdown("**👥 Sales Predictions**")
+                srf = preds.get("sales_rf")
+                sxg = preds.get("sales_xgb")
+                if srf is not None:
+                    st.metric("RF Ownership", f"{int(round(srf)):,}", help="Predicted number of owners")
+                if sxg is not None:
+                    st.metric("XGB Ownership", f"{int(round(sxg)):,}", help="Alternative ownership prediction")
+        else:
+            st.info("🔧 No prediction models found. Add trained models to ./models/ for AI predictions.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            bayes = r.get("BayesAvgRating", np.nan)
-            owned = r.get("Owned Users", np.nan)
-            bayes_pct = year_percentile(same_year.get("BayesAvgRating", pd.Series(dtype=float)), bayes) if has_year else np.nan
-            owned_pct = year_percentile(same_year.get("Owned Users", pd.Series(dtype=float)), owned) if has_year else np.nan
-
-            rows.append({
-                "Name": r.get("Name", "Unknown"),
-                "Year": yr,
-                "Cluster": int(r.get("Cluster", -1)),
-                "Dist": round(float(r["__dist"]), 4),
-                "Bayes Rating": None if pd.isna(bayes) else round(float(bayes), 2),
-                "Better Than X% (Rating, same year)": None if pd.isna(bayes_pct) else f"{bayes_pct:.0f}%",
-                "Owned Users": None if pd.isna(owned) else int(owned),
-                "Better Than X% (Sales, same year)": None if pd.isna(owned_pct) else f"{owned_pct:.0f}%"
-            })
-        nn_df = pd.DataFrame(rows)
-
-        # Narrative analysis card
-        st.markdown("### 📣 Concept Analysis")
+        # Market positioning analysis
         st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
-
-        # Compare against cluster medians
+        st.markdown("### 🎯 Market Positioning")
+        
         cluster_slice = view[view["Cluster"] == assigned_cluster]
-        def med(col): return float(pd.to_numeric(cluster_slice[col], errors="coerce").median()) if col in cluster_slice.columns else np.nan
+        
+        # Compare to cluster medians
+        def med(col): 
+            return float(pd.to_numeric(cluster_slice[col], errors="coerce").median()) if col in cluster_slice.columns else np.nan
 
-        txt_bits = []
-        # Complexity
-        if "GameWeight" in X_cols:
-            cw = float(x_input.iloc[0].get("GameWeight", np.nan))
-            med_w = med("GameWeight")
-            if np.isfinite(cw) and np.isfinite(med_w):
-                if cw > med_w + 0.3: txt_bits.append("• Complexity is **above** typical for this cluster → niche but deeper appeal.")
-                elif cw < med_w - 0.3: txt_bits.append("• Complexity is **below** cluster norm → broader accessibility.")
-                else: txt_bits.append("• Complexity aligns with cluster norms.")
-        # Play time
-        if "Play Time" in X_cols:
-            ct = float(x_input.iloc[0].get("Play Time", np.nan))
-            med_t = med("Play Time")
-            if np.isfinite(ct) and np.isfinite(med_t):
-                if ct > med_t + 20: txt_bits.append("• Play time is **longer** than peers → higher commitment; market narrows.")
-                elif ct < med_t - 20: txt_bits.append("• Play time is **shorter** than peers → quicker sessions; easier adoption.")
-                else: txt_bits.append("• Play time is on par with peers.")
+        positioning_insights = []
+        
+        # Complexity analysis
+        concept_weight = float(x_input.iloc[0].get("GameWeight", np.nan))
+        cluster_weight = med("GameWeight")
+        if np.isfinite(concept_weight) and np.isfinite(cluster_weight):
+            if concept_weight > cluster_weight + 0.4:
+                positioning_insights.append("🧩 **Higher complexity** than similar games → Appeals to hardcore gamers but smaller market")
+            elif concept_weight < cluster_weight - 0.4:
+                positioning_insights.append("🎯 **Lower complexity** than similar games → More accessible, broader appeal")
+            else:
+                positioning_insights.append("⚖️ **Complexity aligns** with similar games → Good market fit")
 
-        # Mechanics highlights
-        mech_on_str = ", ".join(sorted([m for m in profile.keys() if m in mech_cols and profile[m] == 1])[:6])
-        theme_on_str= ", ".join(sorted([t for t in profile.keys() if t in theme_cols and profile[t] == 1])[:6])
-        if mech_on_str:
-            txt_bits.append(f"• Mechanics emphasized: _{mech_on_str}_")
-        if theme_on_str:
-            txt_bits.append(f"• Themes/Categories: _{theme_on_str}_")
-        if not txt_bits:
-            txt_bits.append("• Using cluster medians; no standout mechanics/themes provided.")
+        # Play time analysis
+        concept_time = float(x_input.iloc[0].get("Play Time", np.nan))
+        cluster_time = med("Play Time")
+        if np.isfinite(concept_time) and np.isfinite(cluster_time):
+            if concept_time > cluster_time + 30:
+                positioning_insights.append("⏰ **Longer play time** → Higher commitment but potentially deeper experience")
+            elif concept_time < cluster_time - 30:
+                positioning_insights.append("⚡ **Shorter play time** → Easier to get to table, broader appeal")
+            else:
+                positioning_insights.append("🕐 **Play time matches** market expectations → Good positioning")
 
-        st.write(f"**Assigned Cluster:** {assigned_cluster}")
-        for line in txt_bits: st.write(line)
+        # Mechanics analysis
+        active_mechs = [m for m in profile.keys() if m in X_cols and profile.get(m) == 1 and m.startswith(("Mechanic_", "Deck", "Hand", "Worker", "Cooperative"))]
+        if active_mechs:
+            mech_str = ", ".join(active_mechs[:5])
+            positioning_insights.append(f"🔧 **Key mechanics**: {mech_str}")
+
+        st.write(f"**Assigned to Cluster {assigned_cluster}** with {len(cluster_slice)} similar games")
+        for insight in positioning_insights:
+            st.write(insight)
+        
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Visualization: Concept vs cluster medians (polar)
-        rad_feats = [f for f in [weight_col, ptime_col] if f]
-        if len(rad_feats) >= 1:
-            stats = {}
-            for f in rad_feats:
-                stats[f] = {"concept": float(x_input.iloc[0].get(f, np.nan)), "cluster_med": med(f)}
-            categories = list(stats.keys())
-            concept_vals = [stats[c]["concept"] for c in categories]
-            cluster_vals = [stats[c]["cluster_med"] for c in categories]
+        # Neighbor analysis with charts
+        st.markdown("### 🔍 Similar Games Analysis")
+        st.markdown(f"Found **{len(neighbors)}** games most similar to your concept:")
 
-            def norm(vals):
-                v = pd.Series(vals).astype(float)
-                lo, hi = float(np.nanmin(v)), float(np.nanmax(v))
-                if not np.isfinite(lo) or not np.isfinite(hi) or hi == lo:
-                    return [50 for _ in v]
-                return list((v - lo) / (hi - lo) * 100)
+        # Enhanced neighbor table
+        neighbor_rows = []
+        for _, r in neighbors.iterrows():
+            name = r.get("Name", "Unknown")
+            year = int(r.get("Year Published", 0))
+            rating = r.get("BayesAvgRating", np.nan)
+            owners = r.get("Owned Users", np.nan)
+            complexity = r.get("GameWeight", np.nan)
+            
+            # Calculate percentiles for context
+            same_year_games = view_f[view_f["Year Published"] == year] if year > 0 else pd.DataFrame()
+            rating_pct = year_percentile(same_year_games.get("BayesAvgRating", pd.Series(dtype=float)), rating) if len(same_year_games) > 0 else np.nan
+            owners_pct = year_percentile(same_year_games.get("Owned Users", pd.Series(dtype=float)), owners) if len(same_year_games) > 0 else np.nan
+            
+            neighbor_rows.append({
+                "Game": name,
+                "Year": year if year > 0 else "Unknown",
+                "Rating": f"{rating:.2f}" if not pd.isna(rating) else "N/A",
+                "Rating %ile": f"{rating_pct:.0f}%" if not pd.isna(rating_pct) else "N/A",
+                "Owners": f"{int(owners):,}" if not pd.isna(owners) else "N/A", 
+                "Owners %ile": f"{owners_pct:.0f}%" if not pd.isna(owners_pct) else "N/A",
+                "Complexity": f"{complexity:.1f}" if not pd.isna(complexity) else "N/A",
+                "Distance": f"{r['__dist']:.3f}"
+            })
 
-            fig_r = go.Figure()
-            fig_r.add_trace(go.Scatterpolar(r=norm(concept_vals), theta=categories, fill='toself', name='Concept', line=dict(color=ACCENT)))
-            fig_r.add_trace(go.Scatterpolar(r=norm(cluster_vals), theta=categories, fill='toself', name='Cluster median', line=dict(color=MUTED)))
-            fig_r.update_layout(height=360, margin=dict(l=10,r=10,t=40,b=10), showlegend=True)
-            st.plotly_chart(fig_r, use_container_width=True)
+        neighbors_df = pd.DataFrame(neighbor_rows)
+        st.dataframe(neighbors_df, use_container_width=True, hide_index=True)
 
-        # Neighbors table + download
-        st.subheader("🔎 Nearest Neighbors (same cluster)")
-        st.dataframe(nn_df, use_container_width=True)
-        st.download_button("Download neighbors as CSV", data=nn_df.to_csv(index=False).encode("utf-8"),
-                           file_name="nearest_neighbors.csv", mime="text/csv")
+        # Neighbor-focused charts
+        st.markdown("### 📊 Performance Analysis: Your Concept vs Similar Games")
+        st.markdown("*Charts below show only games similar to your concept*")
+        
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            fig1_neighbors = create_complexity_vs_rating_chart(neighbors, neighbors)
+            st.plotly_chart(fig1_neighbors, use_container_width=True)
+            
+        with chart_col2:
+            fig2_neighbors = create_year_vs_rating_chart(neighbors, neighbors)
+            st.plotly_chart(fig2_neighbors, use_container_width=True)
+        
+        # Full-width bubble chart for neighbors
+        fig3_neighbors = create_bubble_chart(neighbors, neighbors)
+        st.plotly_chart(fig3_neighbors, use_container_width=True)
 
-        # Predictions (if models exist)
-        st.subheader("📈 Predicted Success (if models available)")
-        models = load_models(MODEL_PATHS)
-        if not models:
-            st.info("No models found. Place trained models in ./models or adjust MODEL_PATHS in code.")
-        else:
-            preds = predict_with_models(models, x_input)
-            cols = st.columns(2)
-            with cols[0]:
-                rrf = preds.get("rating_rf"); rxg = preds.get("rating_xgb")
-                st.markdown("**Rating Models**")
-                st.write(f"RandomForest: {rrf:.2f}" if rrf is not None else "RandomForest: n/a")
-                st.write(f"XGBoost: {rxg:.2f}" if rxg is not None else "XGBoost: n/a")
-            with cols[1]:
-                srf = preds.get("sales_rf"); sxg = preds.get("sales_xgb")
-                st.markdown("**Sales Models**")
-                st.write(f"RandomForest: {int(round(srf)):,}" if srf is not None else "RandomForest: n/a")
-                st.write(f"XGBoost: {int(round(sxg)):,}" if sxg is not None else "XGBoost: n/a")
+        # Success patterns analysis
+        st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
+        st.markdown("### 🏆 Success Patterns in Similar Games")
+        
+        if len(neighbors) > 0:
+            high_rated = neighbors[neighbors["BayesAvgRating"] >= 7.5]
+            high_owned = neighbors[neighbors["Owned Users"] >= neighbors["Owned Users"].median()]
+            
+            success_col1, success_col2 = st.columns(2)
+            
+            with success_col1:
+                st.markdown("**🌟 Highly Rated Games (7.5+)**")
+                if len(high_rated) > 0:
+                    st.write(f"• {len(high_rated)} of {len(neighbors)} similar games are highly rated")
+                    avg_complexity = high_rated["GameWeight"].mean()
+                    avg_time = high_rated["Play Time"].mean()
+                    st.write(f"• Average complexity: {avg_complexity:.1f}")
+                    st.write(f"• Average play time: {avg_time:.0f} minutes")
+                else:
+                    st.write("• No highly rated games in this cluster")
+            
+            with success_col2:
+                st.markdown("**👥 Popular Games (High Ownership)**")
+                if len(high_owned) > 0:
+                    st.write(f"• {len(high_owned)} of {len(neighbors)} have above-median ownership")
+                    median_owners = int(high_owned["Owned Users"].median())
+                    recent_popular = high_owned[high_owned["Year Published"] >= 2018]
+                    st.write(f"• Median owners: {median_owners:,}")
+                    st.write(f"• {len(recent_popular)} popular games from 2018+")
+                else:
+                    st.write("• Limited ownership data available")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
 
-            conf_cols = st.columns(2)
-            rf_rating = models.get("rating_rf"); rf_sales = models.get("sales_rf")
-            if rf_rating is not None:
-                r_std = rf_confidence_std(rf_rating, x_input)
-                conf_cols[0].caption(f"RF rating σ (lower≈more confident): {r_std:.3f}" if r_std is not None else "RF rating σ: n/a")
-            if rf_sales is not None:
-                s_std = rf_confidence_std(rf_sales, x_input)
-                conf_cols[1].caption(f"RF sales σ (lower≈more confident): {s_std:.3f}" if s_std is not None else "RF sales σ: n/a")
+        # Download options
+        st.markdown("### 📥 Export Analysis")
+        download_col1, download_col2 = st.columns(2)
+        
+        with download_col1:
+            st.download_button(
+                "📊 Download Similar Games CSV",
+                data=neighbors_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"similar_games_{preset_key.lower().replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
+        
+        with download_col2:
+            # Create summary report
+            summary_data = {
+                "Concept": [preset_key],
+                "Cluster": [assigned_cluster],
+                "Predicted_Rating": [preds.get("rating_rf", "N/A") if models else "N/A"],
+                "Predicted_Owners": [preds.get("sales_rf", "N/A") if models else "N/A"],
+                "Similar_Games_Count": [len(neighbors)],
+                "Complexity": [concept_weight],
+                "Play_Time": [concept_time]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            st.download_button(
+                "📋 Download Analysis Summary",
+                data=summary_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"concept_analysis_{preset_key.lower().replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
 
-# -----------------
-# Cluster Explorer
-# -----------------
-with tab_explore:
-    st.subheader("🔭 Explore a Cluster")
-    cluster_pick = st.selectbox("Choose a cluster to inspect", sorted(view["Cluster"].unique()))
-    dfc = view[view["Cluster"] == cluster_pick].copy()
+# ---------------------------------
+# Cluster Map Tab (Enhanced)
+# ---------------------------------
+with tab_map:
+    st.subheader("🗺️ Game Landscape Map")
+    st.markdown("Explore the board game design space through clustering and PCA visualization")
+    
+    # Map controls
+    map_col1, map_col2 = st.columns([3, 1])
+    
+    with map_col2:
+        color_by_opts = ["Cluster", "Year Published", "GameWeight", "BayesAvgRating"]
+        color_by = st.selectbox("Color points by:", color_by_opts, index=0)
+        
+        show_contours = st.checkbox("Show density contours", value=True)
+        point_size = st.slider("Point size", 4, 12, 8)
+    
+    with map_col1:
+        hover_cols = ["Name", "Year Published", "BayesAvgRating", "Owned Users", "GameWeight", "Play Time"]
+        hover_data = {col: True for col in hover_cols if col in view_f.columns}
 
-    left, right = st.columns([2, 1])
-    with left:
-        fig2 = px.scatter(
-            dfc, x="PCA1", y="PCA2", color="Cluster",
-            color_discrete_sequence=PALETTE,
-            hover_data=[c for c in ["Name", year_col, "BayesAvgRating", "Owned Users", weight_col, ptime_col] if c and c in dfc.columns],
-            title=f"Cluster {cluster_pick} games (PCA)", height=560,
+        fig_map = px.scatter(
+            view_f, x="PCA1", y="PCA2", color=color_by,
+            color_discrete_sequence=PALETTE if color_by == "Cluster" else None,
+            hover_data=hover_data,
+            height=600,
+            title=f"Game Design Space - Colored by {color_by}"
         )
-        fig2.update_traces(marker=dict(size=9, opacity=0.85))
-        fig2.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10))
-        st.plotly_chart(fig2, use_container_width=True)
-    with right:
-        cols_to_show = [c for c in ["Name", year_col, "BayesAvgRating", "Owned Users", "GameWeight", "Play Time"] if c and c in dfc.columns]
-        st.dataframe(dfc[cols_to_show].head(80), use_container_width=True)
+        fig_map.update_traces(marker=dict(size=point_size, opacity=0.8))
+        fig_map.update_layout(
+            plot_bgcolor=CHART_BG,
+            paper_bgcolor=CHART_BG,
+            font_color=MUTED
+        )
+
+        # Add density contours if requested
+        if show_contours and len(view_f) > 50:
+            fig_contour = px.density_contour(view_f, x="PCA1", y="PCA2")
+            for trace in fig_contour.data:
+                trace.update(opacity=0.3, line=dict(color=MUTED))
+                fig_map.add_trace(trace)
+
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    # Cluster statistics
+    st.markdown("### 📈 Cluster Performance Overview")
+    
+    cluster_stats = []
+    for cluster_id in sorted(view_f["Cluster"].unique()):
+        cluster_data = view_f[view_f["Cluster"] == cluster_id]
+        
+        cluster_stats.append({
+            "Cluster": cluster_id,
+            "Games": len(cluster_data),
+            "Avg Rating": f"{cluster_data['BayesAvgRating'].mean():.2f}",
+            "Avg Owners": f"{int(cluster_data['Owned Users'].mean()):,}",
+            "Avg Complexity": f"{cluster_data['GameWeight'].mean():.1f}",
+            "Avg Play Time": f"{int(cluster_data['Play Time'].mean())} min",
+            "Year Range": f"{int(cluster_data['Year Published'].min())}-{int(cluster_data['Year Published'].max())}"
+        })
+    
+    cluster_df = pd.DataFrame(cluster_stats)
+    st.dataframe(cluster_df, use_container_width=True, hide_index=True)
+
+# ---------------------------------
+# Cluster Explorer Tab (Enhanced)
+# ---------------------------------
+with tab_explore:
+    st.subheader("🔭 Deep Dive: Cluster Analysis")
+    
+    explore_col1, explore_col2 = st.columns([1, 2])
+    
+    with explore_col1:
+        cluster_pick = st.selectbox("Select cluster to explore:", sorted(view_f["Cluster"].unique()))
+        
+        cluster_data = view_f[view_f["Cluster"] == cluster_pick].copy()
+        
+        st.markdown(f"### Cluster {cluster_pick} Overview")
+        st.metric("Total Games", len(cluster_data))
+        st.metric("Avg Rating", f"{cluster_data['BayesAvgRating'].mean():.2f}")
+        st.metric("Avg Complexity", f"{cluster_data['GameWeight'].mean():.1f}")
+        st.metric("Avg Play Time", f"{int(cluster_data['Play Time'].mean())} min")
+        
+        # Top games in cluster
+        st.markdown("**🏆 Top Rated Games:**")
+        top_games = cluster_data.nlargest(5, "BayesAvgRating")[["Name", "BayesAvgRating", "Year Published"]]
+        for _, game in top_games.iterrows():
+            st.write(f"• {game['Name']} ({game['Year Published']:.0f}) - {game['BayesAvgRating']:.2f}")
+    
+    with explore_col2:
+        # Cluster visualization
+        fig_cluster = px.scatter(
+            cluster_data, x="PCA1", y="PCA2",
+            size="Owned Users", color="BayesAvgRating",
+            hover_data=["Name", "Year Published", "GameWeight"],
+            color_continuous_scale="Viridis",
+            title=f"Cluster {cluster_pick} - Size by Owners, Color by Rating",
+            height=500
+        )
+        fig_cluster.update_layout(
+            plot_bgcolor=CHART_BG,
+            paper_bgcolor=CHART_BG,
+            font_color=MUTED
+        )
+        st.plotly_chart(fig_cluster, use_container_width=True)
+        
+        # Cluster trends over time
+        yearly_stats = cluster_data.groupby("Year Published").agg({
+            "BayesAvgRating": "mean",
+            "Owned Users": "mean", 
+            "GameWeight": "mean",
+            "Name": "count"
+        }).reset_index()
+        yearly_stats.rename(columns={"Name": "Game Count"}, inplace=True)
+        
+        if len(yearly_stats) > 1:
+            fig_trends = px.line(
+                yearly_stats, x="Year Published", y="BayesAvgRating",
+                title=f"Rating Trends in Cluster {cluster_pick}",
+                height=300
+            )
+            fig_trends.update_layout(
+                plot_bgcolor=CHART_BG,
+                paper_bgcolor=CHART_BG,
+                font_color=MUTED
+            )
+            st.plotly_chart(fig_trends, use_container_width=True)
+
+    # Detailed game list for the cluster
+    st.markdown("### 📋 All Games in Cluster")
+    display_cols = ["Name", "Year Published", "BayesAvgRating", "Owned Users", "GameWeight", "Play Time"]
+    cluster_display = cluster_data[display_cols].sort_values("BayesAvgRating", ascending=False)
+    st.dataframe(cluster_display, use_container_width=True, hide_index=True)
 
 # ---------------------------------
 # Footer
 # ---------------------------------
-st.caption("Tip: Start with a profile type, let the app estimate, then tweak. Upload a dataset or include cleaned_large_bgg_dataset.parquet for instant use.")
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center; color: #6B705C; padding: 1rem;'>
+    🎲 <strong>Board Game Developer Console</strong> | 
+    Built for data-driven game design decisions | 
+    Upload your own dataset or use the default BGG data
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
