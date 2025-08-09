@@ -12,7 +12,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
 from joblib import load as joblib_load
-
+os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "poll")
 # Page config & theme
 st.set_page_config(page_title="Board Game Developer Console", page_icon="🎲", layout="wide")
 
@@ -1109,4 +1109,5 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
