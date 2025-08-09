@@ -96,14 +96,14 @@ h1, h2, h3, h4 {{ color: {ACCENT}; font-family: 'Georgia', serif; }}
     border-radius: 0 8px 8px 0;
 }}
 /* styled narrative blockquotes */
-.stApp blockquote {
+.stApp blockquote {{
     background: linear-gradient(90deg, {CHART_BG} 0%, #FFF 100%);
     border-left: 5px solid {ACCENT};
     padding: 1rem 1.5rem;
     margin: 1rem 0;
     border-radius: 0 8px 8px 0;
     color: {MUTED};
-}
+}}
 .recommendation-card {{
     background: {CHART_BG};
     border: 2px dashed {SECONDARY};
@@ -2276,6 +2276,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
