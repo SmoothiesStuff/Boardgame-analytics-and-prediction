@@ -773,7 +773,14 @@ with st.sidebar.expander("🎲 Mechanics & Themes", expanded=False):
     selected_themes = st.multiselect("Select Themes", theme_cols[:20], default=[])
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 **Pro Tip:** Use filters to focus on your target market segment for more accurate insights")
+st.sidebar.caption("💡 **Tip:** Use filters to focus on your target market segment for more accurate insights")
+########## narrative toggle + helper ##########
+st.sidebar.markdown("### 📝 Narrative")
+st.sidebar.checkbox("Show narrative insights", True, key="show_narrative")
+
+def narr(md: str):
+    if st.session_state.get("show_narrative", True):
+        st.markdown(f"<div class='insight-box'>{md}</div>", unsafe_allow_html=True)
 
 # Convert play time range to minutes
 pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
@@ -884,6 +891,9 @@ with col6:
     st.metric("Success Rate", f"{success_rate:.1f}%")
     st.caption("Games rated ≥7.0")
     st.markdown('</div>', unsafe_allow_html=True)
+narr(f"""
+**Quick read of the market.** At a glance the median rating is {median_rating:.2f}. That lines up with a larger pattern from my dashboard work. Low complexity games under 2.0 are usually not great. Quality starts to appear around 2.5 and keeps climbing as games get deeper. The surprise is that very simple games can still shine when the design is clean and intentional. If you want consistent quality, aim for thoughtful depth rather than a pile of rules. Families do not hate depth. They hate clutter.
+""")
 
 # Enhanced tabs with more analysis
 tab_intel, tab_wizard, tab_trends, tab_segments, tab_synergies = st.tabs([
@@ -915,12 +925,19 @@ with tab_intel:
             st.write(f"⭐ {data['avg_rating']:.2f} avg")
             st.write(f"🎯 Example: {data['top_game'][:20]}...")
             st.markdown('</div>', unsafe_allow_html=True)
-    
+
+    narr("""
+    **How to use these segments.** The Opportunity Score surfaces places where demand outpaces supply. The healthiest pockets tend to be moderate complexity with real decision space, 60 to 90 minutes, and a minimum age of 10. Co-op with solo support often doubles engagement because players can learn alone then bring the table along. If a segment is small and strong, it is not a red flag. It is a green light for a focused design that respects time and attention.
+    """)
+
     # Market evolution timeline
     st.markdown("### 📈 Complete Market Evolution (1950-Present)")
     evolution_fig = create_market_evolution_timeline(view_f)
     st.plotly_chart(evolution_fig, use_container_width=True)
-    
+    narr("""
+    **What changed over time.** The boom after Catan raised the bar. Ratings rose and designers learned to do more with less. Complexity ticked up, yet playtime did not. That is craft improving. Strategic richness without bloat. The market now rewards clarity, replay, and respect for the clock.
+    """)
+
     # Key insights
     st.markdown("### 💡 Data-Driven Market Insights")
     
@@ -988,6 +1005,10 @@ with tab_intel:
     with pred_col2:
         time_success_fig = create_success_predictor_chart(view_f, "Play Time Hours", "AvgRating")
         st.plotly_chart(time_success_fig, use_container_width=True)
+        
+    narr("""
+    **Complexity and time, together.** Longer games tend to rate higher, but there is a ceiling on how many people will buy a three hour commitment. Short and complex is the unicorn. When a game is deep and plays fast, it becomes a staple. If a game is simple, keep it short. Stretching a simple idea for an hour turns charm into chores.
+    """)
 
 # Design Wizard Tab  
 with tab_wizard:
@@ -1085,10 +1106,13 @@ with tab_wizard:
             component_quality = st.select_slider("Component Quality",
                                                 ["Basic", "Good", "Premium"],
                                                 value="Good")
-        
+        narr("""
+    **Design first principles.** Start from three anchors. Target complexity that invites thinking without confusion. Land the core loop in 60 to 90 minutes. Aim the minimum age at 10 so families and hobby tables overlap. From there, pick one mechanic that does the heavy lifting and one that creates emergent texture. Resist adding a third that just adds rules.
+    """)
+
         analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", 
                                               type="primary", use_container_width=True)
-    
+        
     if analyze_button:
         # Build comprehensive profile
         profile = {
@@ -1215,7 +1239,10 @@ with tab_wizard:
                 st.caption(f"💰 Payback: {payback}")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-           
+           narr(f"""
+    **Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. If the model likes your rating but owners look soft, the design might be niche or overpriced. If owners look strong but rating is middling, you might have a fun toy that needs sharper decisions. Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes.
+    """)
+
                         ########## Pricing & Unit Economics ##########
             st.markdown("### 💵 Pricing & Unit Economics")
             
@@ -1336,7 +1363,10 @@ with tab_wizard:
                 paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=380
             )
             st.plotly_chart(fig_price, use_container_width=True)
-    
+            narr("""
+            **Price and promise.** Premium pricing only works when the table can feel why. Component quality helps, but repeatable decisions and clean turns are what justify a number. Break even is a milestone. Word of mouth is the margin.
+            """)
+
             ########## design analysis visuals ##########
             st.markdown("### 🎨 Visuals")
             
@@ -1449,8 +1479,11 @@ with tab_wizard:
                 paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
             )
             st.plotly_chart(fig_c, use_container_width=True)
-    
-                
+
+            narr("""
+            **Position with intent.** If you sit to the right on complexity, give players early wins. If your playtime is shorter than the segment, lean on tension not upkeep. If your price is friendly, make the first play magical then let depth unfold on play three.
+            """)
+
             # Market positioning
             st.markdown("### 📍 Market Positioning Analysis")
             
@@ -1812,7 +1845,11 @@ with tab_trends:
     )
     
     st.plotly_chart(fig_themes, use_container_width=True)
-    
+
+    narr("""
+    **Where the puck is going.** Themes cycle, but the constant is respect for time. Designers are packing strategy into tighter sessions. That is not dumbing things down. That is craft. If you are designing into the near future, pair a strong theme with clean teach, depth that reveals across plays, and a clear promise on the box about time.
+    """)
+
     # Complexity creep analysis
     st.markdown("### 🧩 The Complexity Creep Phenomenon")
     
@@ -1912,6 +1949,9 @@ with tab_trends:
     
     st.markdown('</div>', unsafe_allow_html=True)
 
+    narr("""
+    **Two year outlook.** Expect a steady stream of midweight designs that play under two hours. Expect more solo modes. Expect fewer lazy products. The audience is informed and generous when the game respects them.
+    """)
 # Segment Explorer Tab
 with tab_segments:
     st.markdown("## 🗺️ Market Segment Deep Dive")
@@ -1955,6 +1995,9 @@ with tab_segments:
         st.markdown(f"<h3 style='color: {color}'>{opportunity:.0f}%</h3>", unsafe_allow_html=True)
         st.caption("Opportunity score")
     
+    narr("""
+    **Reading a segment.** Look at three things. What the segment loves to do (mechanics above thirty percent). How long the table sits (median playtime). Where quality clusters (rating distribution). If your idea fights the segment norms, make the reason obvious and delightful.
+    """)
     # Segment characteristics
     segment_cols = st.columns(2)
     
@@ -2065,7 +2108,9 @@ with tab_segments:
     )
     
     st.plotly_chart(fig_segment_evolution, use_container_width=True)
-    
+    narr("""
+    **Entering the segment.** If releases are rising and ratings hold, the space is hungry. If releases spike and ratings sag, the space needs curation. Add one new idea that matters, not six that confuse.
+    """)
     # Opportunities in segment
     st.markdown("#### 💡 Opportunities in This Segment")
     
@@ -2112,6 +2157,9 @@ with tab_synergies:
         
         network_fig = create_mechanic_network_graph(synergies, top_n=30)
         st.plotly_chart(network_fig, use_container_width=True)
+        narr("""
+        **Mechanics that sing.** Some pairs create clarity. Worker placement with a market. Co-op with variable powers. Drafting with tempo pressure. Do not pile on features. Pick a duet, not a chorus. Leave room for players to discover lines you did not script.
+        """)
         
         # Underexplored combinations
         st.markdown("### 💎 Underexplored High-Potential Combinations")
@@ -2126,6 +2174,9 @@ with tab_synergies:
                 st.write(f"• **{row['Mechanic 1']} + {row['Mechanic 2']}**: Only {row['Games']} games, but {row['Success Rate']*100:.0f}% success rate")
             
             st.markdown('</div>', unsafe_allow_html=True)
+        narr("""
+        **High upside, low volume.** Underplayed combinations with strong success rates are design invitations. Prototype fast. Play with real people. If the table smiles without your help, you are close.
+        """)
         
         # Mechanic pairing recommendations by complexity
         st.markdown("### 🎯 Recommended Pairings by Complexity Level")
@@ -2153,6 +2204,9 @@ with tab_synergies:
         st.info("Not enough data to calculate mechanic synergies with current filters")
 
 # Footer with additional resources
+narr("""
+**Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
+""")
 st.markdown("---")
 st.markdown("### 📚 Additional Resources")
 
@@ -2200,6 +2254,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
