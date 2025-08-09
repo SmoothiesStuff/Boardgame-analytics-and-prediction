@@ -1,88 +1,4 @@
-def create_complexity_binned_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
-    """Create binned complexity chart with 0.25 bins"""
-    # Create complexity bins
-    complexity_bins = np.arange(1, 5.5, 0.25)
-    df_binned = df_filtered.copy()
-    df_binned['complexity_bin'] = pd.cut(df_binned['GameWeight'], bins=complexity_bins, include_lowest=True)
-    
-    # Aggregate by complexity bins
-    agg_data = df_binned.groupby('complexity_bin').agg({
-        'AvgRating': 'mean',
-        'GameWeight': 'mean',
-        'Name': 'count'
-    }).reset_index()
-    agg_data = agg_data.dropna()
-    
-    fig = go.Figure()
-    
-    # Main aggregated points
-    fig.add_trace(go.Scatter(
-        x=agg_data["GameWeight"],
-        y=agg_data["AvgRating"], 
-        mode='markers+lines',
-        marker=dict(
-            size=agg_data["Name"] * 2 + 8,
-            color=CHART_COLORS[0], 
-            opacity=0.7,
-            line=dict(width=2, color='white')
-        ),
-        line=dict(color=CHART_COLORS[0], width=2),
-        text=agg_data["Name"],
-        customdata=agg_data["GameWeight"],
-        hovertemplate="<b>Complexity %{customdata:.2f}</b><br>Average Rating: %{y:.2f}<br>Games: %{text}<extra></extra>",
-        name="Binned Averages",
-        showlegend=True
-    ))
-    
-    fig.update_layout(
-        title="Complexity vs Rating (Binned Averages)",
-        xaxis_title="Complexity (1=Simple, 5=Very Complex)",
-        yaxis_title="Average Player Rating",
-        plot_bgcolor=CHART_BG,
-        paper_bgcolor=CHART_BG,
-        height=400,
-        font_color=MUTED
-    )
-    return fig
 
-def create_year_line_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
-    """Create line chart with yearly averages"""
-    # Aggregate by year
-    yearly_agg = df_filtered.groupby("Year Published").agg({
-        "AvgRating": "mean",
-        "Name": "count"
-    }).reset_index()
-    
-    fig = go.Figure()
-    
-    # Main line chart
-    fig.add_trace(go.Scatter(
-        x=yearly_agg["Year Published"],
-        y=yearly_agg["AvgRating"],
-        mode='lines+markers',
-        marker=dict(
-            size=yearly_agg["Name"] / 2 + 6,
-            color=CHART_COLORS[2], 
-            line=dict(width=2, color='white')
-        ),
-        line=dict(color=CHART_COLORS[2], width=3),
-        text=yearly_agg["Name"],
-        customdata=yearly_agg["Year Published"],
-        hovertemplate="<b>Year %{customdata}</b><br>Average Rating: %{y:.2f}<br>Games Released: %{text}<extra></extra>",
-        name="Yearly Averages",
-        showlegend=True
-    ))
-    
-    fig.update_layout(
-        title="Rating Evolution by Year (Connected)",
-        xaxis_title="Year Published",
-        yaxis_title="Average Player Rating",
-        plot_bgcolor=CHART_BG,
-        paper_bgcolor=CHART_BG,
-        height=400,
-        font_color=MUTED
-    )
-    return fig
         # streamlit_app.py — Enhanced Board Game Developer Console
 import os
 import math
@@ -1277,3 +1193,4 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
