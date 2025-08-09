@@ -212,6 +212,52 @@ def discover_available_themes(X_cols, preset_cats=None, limit=60):
             if c not in seen:
                 ordered.append(c); seen.add(c)
     return ordered[:limit]
+def discover_mechanics(cols):
+    base = [c for c in cols if isinstance(c, str) and c.startswith("Mechanic_")]
+    extras = [c for c in [
+        "Cooperative Game","Variable Player Powers","Deck Construction","Hand Management",
+        "Worker Placement","Dice Rolling","Set Collection","Action Points","Hidden Roles",
+        "Tile Placement","Area Majority / Influence","Pattern Building","Grid Movement",
+        "Market","Network and Route Building","Auction/Bidding"
+    ] if c in cols]
+    # de-dupe, preserve order
+    seen, ordered = set(), []
+    for c in base + extras:
+        if c not in seen:
+            ordered.append(c); seen.add(c)
+    return ordered
+
+def discover_themes(cols):
+    base = [c for c in cols if isinstance(c, str) and c.startswith("Cat:")]
+    extras = [c for c in [
+        "Fantasy","Adventure","Economic","Science Fiction","War","Horror","City Building",
+        "Civilization","Animals","Mythology","Historical","Nautical","Pirates",
+        "Space Exploration","Post-Apocalyptic","Steampunk","Western","Zombies","Mystery",
+        "Crime","Humor","Transportation","Trains","Aviation","Automobile","Sports","Medical",
+        "Industry / Manufacturing","Educational","Environmental","Travel","Card Game","Dice",
+        "Miniatures","Territory Building","Negotiation"
+    ] if c in cols]
+    seen, ordered = set(), []
+    for c in base + extras:
+        if c not in seen:
+            ordered.append(c); seen.add(c)
+    return ordered
+
+def render_toggle_grid(options, defaults=None, columns=3, key_prefix="tg"):
+    """Render options as checkboxes in a grid; return list of selected option names."""
+    defaults = set(defaults or [])
+    sels = []
+    cols = st.columns(columns)
+    for i, opt in enumerate(options):
+        with cols[i % columns]:
+            checked = st.checkbox(
+                opt.replace("Mechanic_", "").replace("Cat:", ""),
+                value=(opt in defaults),
+                key=f"{key_prefix}_{i}_{opt}"
+            )
+            if checked:
+                sels.append(opt)
+    return sels
 
 
 def align_profile_to_training(profile: dict, training_cols: list[str], scaler=None) -> pd.DataFrame:
@@ -1238,20 +1284,21 @@ with tab_wizard:
         mech_theme_cols = st.columns(2)
         
         with mech_theme_cols[0]:
-            available_mechs = [c for c in X_all.columns if c.startswith("Mechanic_") or c in preset_data["mechs_on"]][:40]
-            selected_mechanics = st.multiselect("Core Mechanics (3-5 recommended)",
-                                              available_mechs,
-                                              default=preset_data["mechs_on"][:3])
+            st.markdown("#### Mechanics (toggle any)")
+            # Solo Mode toggle (model-safe → Min Players = 1)
+            solo_mode = st.checkbox("Solo Mode", value=(preset_data.get("min_players", 1) == 1), key="solo_mode_toggle")
+        
+            mech_all = discover_mechanics(X_all.columns)
+            mech_defaults = [m for m in preset_data.get("mechs_on", []) if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)]
+            # normalize defaults to actual column names present
+            mech_defaults = [m if m in mech_all else f"Mechanic_{m.replace(' ', '_')}" for m in mech_defaults if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)]
+            selected_mechanics = render_toggle_grid(mech_all, defaults=mech_defaults, columns=3, key_prefix="mech")
         
         with mech_theme_cols[1]:
-            available_themes = discover_available_themes(X_all.columns, preset_cats=preset_data["cats"], limit=60)
-            default_themes = [c for c in preset_data["cats"] if c in available_themes][:3]
-            selected_themes = st.multiselect(
-                "Themes & Categories (model-aware)",
-                options=available_themes,
-                default=default_themes,
-                help="Only shows themes present in the model’s feature set so predictions stay aligned."
-            )
+            st.markdown("#### Themes & Categories (toggle any)")
+            theme_all = discover_themes(X_all.columns)
+            theme_defaults = [c for c in preset_data.get("cats", []) if c in theme_all]
+            selected_themes = render_toggle_grid(theme_all, defaults=theme_defaults, columns=3, key_prefix="theme")
         
         st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
         
@@ -1296,17 +1343,17 @@ with tab_wizard:
         }
         
         # Add mechanics and themes
-        for mech in selected_mechanics:
-            if mech in X_all.columns:
-                profile[mech] = 1
-        
-        for theme in selected_themes:
-            if theme in X_all.columns:
-                profile[theme] = 1
-
-        # Solo mode: model-safe signal -> Min Players = 1
+        # Solo Mode → force Min Players = 1
         if solo_mode:
             profile["Min Players"] = 1
+        
+        # Mechanics: set exact columns (already aligned to X_all)
+        for m in selected_mechanics:
+            profile[m] = 1
+        
+        # Themes: set exact columns (already aligned to X_all)
+        for t in selected_themes:
+            profile[t] = 1
         
         # Mechanic toggles (only set if column exists)
         toggle_feature(profile, X_all.columns, coop_toggle, "Cooperative Game")
@@ -2436,6 +2483,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
