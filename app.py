@@ -1,5 +1,7 @@
 # streamlit_app.py — Enhanced Board Game Developer Console
 import os
+os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "poll")
+os.environ.setdefault("WATCHDOG_FORCE_POLLING", "true")
 import math
 from typing import Dict, List, Tuple
 import numpy as np
@@ -12,7 +14,6 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
 from joblib import load as joblib_load
-
 # Page config & theme
 st.set_page_config(page_title="Board Game Developer Console", page_icon="🎲", layout="wide")
 
@@ -73,11 +74,12 @@ EXCLUDE_FOR_CLUSTERING = [
 ]
 
 MODEL_PATHS = {
-    "rating_rf": "models/rating_rf.joblib",
     "rating_xgb": "models/rating_xgb.joblib", 
-    "sales_rf": "models/sales_rf.joblib",
     "sales_xgb": "models/sales_xgb.joblib",
 }
+INPUT_SCALER_PATH = "models/input_scaler.joblib"
+# Columns that are engineered for the app and should never be fed to the model
+PRED_EXCLUDE = {"Cluster", "PCA1", "PCA2", "LogOwned", "SalesPercentile", "__dist"}
 
 CURRENT_YEAR = 2025
 
@@ -110,20 +112,175 @@ def split_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     meta = df[keep_cols].copy()
     return X, meta
 
+# ==== Input alignment & logging helpers =======================================
+# These make sure the UI profile aligns 1:1 with the model's training columns,
+# guards one-hots, clamps to training range, and prints/saves the exact vector
+# fed into the model for debugging/review.
+
+# Columns you NEVER want to feed to the predictor (engineered for the app only)
+PRED_EXCLUDE = set(PRED_EXCLUDE)  # simplest
+
+# One-hot families (prefixes) to sanity-check
+ONEHOT_PREFIXES = ["Cat:", "Mechanic_", "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"]
+
+# Numeric columns commonly present in BGG-style features (extend if you have more)
+NUMERIC_COLS = [
+    "Year Published","Min Players","Max Players","Play Time","Min Age",
+    "GameWeight","Kickstarted","BestPlayers","Rating Average","Complexity Average"
+]
+
+def _coerce_types(profile: dict, numeric_cols: list[str]) -> dict:
+    out = {}
+    for k, v in profile.items():
+        if isinstance(v, str) and k in numeric_cols:
+            v = v.replace(",", ".")  # handle decimal commas
+        if k in numeric_cols:
+            try:
+                out[k] = float(v)
+            except Exception:
+                out[k] = 0.0
+        else:
+            out[k] = v
+    return out
+
+def _fix_consistency(p: dict) -> dict:
+    # keep min/max players coherent
+    if "Min Players" in p and "Max Players" in p and p["Min Players"] > p["Max Players"]:
+        p["Max Players"] = p["Min Players"]
+    # keep playtime roughly sane if you have community mins/max in your set
+    if "ComMinPlaytime" in p and "ComMaxPlaytime" in p and p["ComMinPlaytime"] > p["ComMaxPlaytime"]:
+        p["ComMaxPlaytime"] = p["ComMinPlaytime"]
+    return p
+
+def _ensure_onehots(x_df: pd.DataFrame, training_cols: list[str]) -> None:
+    """If all zeros within a one-hot group, flip the first feature in that group to 1 as a neutral default."""
+    for pref in ONEHOT_PREFIXES:
+        group = [c for c in training_cols if c.startswith(pref)]
+        if not group:
+            continue
+        if (x_df[group].sum(axis=1).iloc[0] == 0):
+            x_df.at[x_df.index[0], group[0]] = 1.0
+
+def _clamp_with_scaler(x_df: pd.DataFrame, scaler, training_cols: list[str]) -> None:
+    """Clamp numeric inputs to the scaler's observed training range (keeps things in-distribution)."""
+    num_cols = [c for c in training_cols if c in NUMERIC_COLS]
+    if not num_cols or scaler is None:
+        return
+    idx = [training_cols.index(c) for c in num_cols]
+    arr = x_df[training_cols].astype(float).values
+    if hasattr(scaler, "data_min_"):   # MinMaxScaler-like
+        lo = scaler.data_min_[idx]; hi = scaler.data_max_[idx]
+    elif hasattr(scaler, "mean_") and hasattr(scaler, "scale_"):  # StandardScaler-like
+        lo = scaler.mean_[idx] - 4 * scaler.scale_[idx]
+        hi = scaler.mean_[idx] + 4 * scaler.scale_[idx]
+    else:
+        return
+    arr[:, idx] = np.clip(arr[:, idx], lo, hi)
+    x_df[training_cols] = arr
+
+def align_profile_to_training(profile: dict, training_cols: list[str], scaler=None) -> pd.DataFrame:
+    """Return a single-row DataFrame exactly matching training_cols (minus PRED_EXCLUDE)."""
+    training_cols = [c for c in training_cols if c not in PRED_EXCLUDE]
+    clean = _coerce_types(profile, NUMERIC_COLS)
+    clean = _fix_consistency(clean)
+    # fill missing with 0
+    row = {c: 0.0 for c in training_cols}
+    row.update({k: clean.get(k, row.get(k, 0.0)) for k in training_cols})
+    X = pd.DataFrame([row], columns=training_cols)
+    _ensure_onehots(X, training_cols)
+    _clamp_with_scaler(X, scaler, training_cols)
+    # ensure numeric dtype
+    for c in X.columns:
+        X[c] = pd.to_numeric(X[c], errors="coerce").fillna(0.0)
+    return X
+
+def sanity_report(x_df: pd.DataFrame) -> list[str]:
+    """Lightweight guardrails to surface suspicious inputs in the UI log."""
+    msgs = []
+    def within(name, lo, hi):
+        if name in x_df.columns:
+            v = float(x_df.iloc[0][name])
+            if not (lo <= v <= hi):
+                msgs.append(f"{name}={v} looks unusual (expected {lo}–{hi}).")
+    within("Min Age", 6, 21)
+    within("Play Time", 10, 600)
+    within("GameWeight", 1.0, 4.9)
+    within("Min Players", 1, 12)
+    within("Max Players", 1, 20)
+    return msgs
+
+def log_vector(tag: str, X: pd.DataFrame, save_csv_path: str = "last_inference_vector.csv"):
+    """Print and optionally save the exact vector fed into the model (columns + values)."""
+    print(f"\n=== {tag}: vector fed into model ===")
+    print("shape:", X.shape)
+    print("columns:", list(X.columns))
+    print("values:", X.iloc[0].to_dict())
+    try:
+        X.to_csv(save_csv_path, index=False)
+        print(f"Saved to: {save_csv_path}")
+    except Exception:
+        pass
+    # Streamlit preview (non-fatal if st not available at import time)
+    try:
+        import streamlit as st  # already imported in this app
+        with st.expander(f"{tag} – fed vector preview", expanded=False):
+            st.write("shape:", X.shape)
+            st.dataframe(X)
+            st.caption(f"Saved CSV → {save_csv_path}")
+    except Exception:
+        pass
+# ==============================================================================
+
 @st.cache_resource(show_spinner=False)
 def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
-    if len(X) < k:
-        k = max(2, len(X))
+    # scale first
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+
+    # how many distinct points do we actually have?
     try:
-        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init="auto")
+        # unique on rows (OK for moderate N; if huge, switch to hashing)
+        n_unique = np.unique(X_scaled, axis=0).shape[0]
+    except Exception:
+        # fallback if memory-constrained
+        n_unique = max(1, len(X))
+
+    # choose a safe k
+    k_eff = max(2, min(k, n_unique, len(X)))
+
+    # if we still can't cluster meaningfully, fall back to single cluster
+    if k_eff < 2:
+        labels = np.zeros(len(X), dtype=int)
+        # PCA guards (need at least 2 features and 2 samples)
+        n_comp = int(min(2, X_scaled.shape[1], max(1, len(X_scaled))))
+        if n_comp >= 2:
+            pca = PCA(n_components=2, random_state=random_state)
+            coords = pca.fit_transform(X_scaled)
+        else:
+            coords = np.c_[X_scaled[:, :1], np.zeros((len(X_scaled), 1))]
+        # dummy kmeans-like object
+        class _DummyK:
+            def predict(self, Z): return np.zeros(len(Z), dtype=int)
+        return scaler, _DummyK(), None, labels, coords
+
+    # fit kmeans safely
+    try:
+        kmeans = KMeans(n_clusters=k_eff, random_state=random_state, n_init="auto")
     except TypeError:
-        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+        kmeans = KMeans(n_clusters=k_eff, random_state=random_state, n_init=10)
     labels = kmeans.fit_predict(X_scaled)
-    pca = PCA(n_components=2, random_state=random_state)
-    coords = pca.fit_transform(X_scaled)
+
+    # PCA with guards
+    n_comp = int(min(2, X_scaled.shape[1], len(X_scaled)))
+    if n_comp >= 2:
+        pca = PCA(n_components=2, random_state=random_state)
+        coords = pca.fit_transform(X_scaled)
+    else:
+        coords = np.c_[X_scaled[:, :1], np.zeros((len(X_scaled), 1))]
+        pca = None
+
     return scaler, kmeans, pca, labels, coords
+
 
 def year_percentile(series: pd.Series, value: float) -> float:
     if series is None or len(series) == 0:
@@ -155,22 +312,117 @@ def nearest_neighbors_in_cluster(input_scaled, cluster_id: int, df_full: pd.Data
 def load_models(paths: Dict[str, str]):
     models = {}
     for key, path in paths.items():
-        if os.path.exists(path):
-            try:
-                models[key] = joblib_load(path)
-            except Exception as e:
-                st.warning(f"Could not load {key} at {path}: {e}")
+        if not os.path.exists(path):
+            st.warning(f"Model missing: {key} → {path}")
+            continue
+        try:
+            models[key] = joblib_load(path)
+            st.caption(f"✅ Loaded model: {key} from {path}")
+        except ImportError as e:
+            st.error(f"{key}: missing dependency while loading → {e}")
+        except Exception as e:
+            st.exception(e)
+
+    # Load optional input scaler if present
+    try:
+        if os.path.exists(INPUT_SCALER_PATH):
+            models["_input_scaler"] = joblib_load(INPUT_SCALER_PATH)
+            st.caption("✅ Loaded input scaler")
+        else:
+            st.info("ℹ️ No input scaler file found (models/input_scaler.joblib).")
+    except Exception as e:
+        st.warning(f"Could not load input scaler: {e}")
+
+    if not models:
+        st.info("No models loaded. Ensure files exist and dependencies match training env.")
     return models
 
-def predict_with_models(models: Dict, X_input_df: pd.DataFrame) -> Dict[str, float | None]:
+def _align_features(model, X_input_df: pd.DataFrame) -> pd.DataFrame:
+    # If the model knows its training columns, align to them
+    if hasattr(model, "feature_names_in_"):
+        cols = list(model.feature_names_in_)
+        return X_input_df.reindex(columns=cols, fill_value=0)
+    return X_input_df
+
+
+
+def predict_with_models(models: Dict, X_input_profile: Dict) -> Dict[str, float | None]:
+    """
+    Build the exact feature vector each model/scaler expects, sanity-check it,
+    log/CSV the fed vector, then predict.
+    """
     out = {}
-    for key, model in models.items():
+    scaler_obj = models.get("_input_scaler", None)
+
+    # 1) Determine canonical training columns
+    training_cols = get_training_feature_names(models)
+    if not training_cols:
+        st.error("Models lack feature_names_in_. Re-save models with feature names or provide a column list.")
+        return {k: None for k in models.keys() if not k.startswith("_")}
+
+    # 2) Build & align the vector (coercion, defaults, one-hot guards, clamping)
+    Xvec = build_vector_for_columns(training_cols, X_input_profile, scaler=scaler_obj)
+
+    # 3) Sanity messages
+    for w in sanity_report(Xvec):
+        st.warning(w)
+
+    # 4) Optional *additional* transform if your models are not Pipelines and you still need scaling
+    Xvec_scaled = Xvec.copy()
+    if scaler_obj is not None and not hasattr(scaler_obj, "named_steps"):
         try:
-            out[key] = float(model.predict(X_input_df)[0])
-        except Exception:
+            Xvec_scaled = pd.DataFrame(scaler_obj.transform(Xvec), columns=Xvec.columns)
+        except Exception as e:
+            st.error(f"Scaler transform failed: {e}")
+            Xvec_scaled = Xvec.copy()
+
+    # 5) Log the final fed vector (post-scaling if applied) and save CSV for review
+    log_vector("Inference", Xvec_scaled, save_csv_path="last_inference_vector.csv")
+
+    # 6) Predict per model (reindex if model trained on a subset)
+    for key, model in models.items():
+        if key.startswith("_"):
+            continue
+        try:
+            Xm = Xvec_scaled
+            if hasattr(model, "feature_names_in_") and model.feature_names_in_ is not None:
+                cols = list(model.feature_names_in_)
+                Xm = Xvec_scaled.reindex(columns=cols, fill_value=0.0)
+            pred = model.predict(Xm)
+            out[key] = float(pred[0])
+        except Exception as e:
+            st.error(f"Prediction failed for {key}: {e}")
             out[key] = None
+
     return out
 
+
+
+def get_training_feature_names(models: Dict) -> list[str]:
+    """
+    Prefer the scaler's training columns (if present), otherwise union of each model's feature_names_in_.
+    """
+    cols = []
+    scaler_obj = models.get("_input_scaler")
+    if hasattr(scaler_obj, "feature_names_in_"):
+        return list(scaler_obj.feature_names_in_)
+    for key, m in models.items():
+        if key.startswith("_"): 
+            continue
+        if hasattr(m, "feature_names_in_") and m.feature_names_in_ is not None:
+            cols.extend(list(m.feature_names_in_))
+    # de-dupe, preserve order
+    seen, out = set(), []
+    for c in cols:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return out
+
+def build_vector_for_columns(target_cols: list[str], profile: Dict, scaler=None) -> pd.DataFrame:
+    """
+    Create a 1-row DataFrame with EXACTLY target_cols using the robust aligner.
+    """
+    return align_profile_to_training(profile, target_cols, scaler=scaler)
 # Visualization functions
 def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
     fig = go.Figure()
@@ -187,9 +439,9 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
         showlegend=True
     ))
     
-    # Add non-linear trend line (polynomial)
+    # Add trend line
     if len(df_filtered) > 5:
-        z = np.polyfit(df_filtered["GameWeight"], df_filtered["AvgRating"], 2)  # Quadratic
+        z = np.polyfit(df_filtered["GameWeight"], df_filtered["AvgRating"], 1)
         p = np.poly1d(z)
         trend_x = np.linspace(df_filtered["GameWeight"].min(), df_filtered["GameWeight"].max(), 100)
         fig.add_trace(go.Scatter(
@@ -197,7 +449,7 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
             y=p(trend_x),
             mode='lines',
             line=dict(color=CHART_COLORS[4], width=3, dash='dash'),
-            name='Growth Trend',
+            name='Trend Line',
             showlegend=True
         ))
     
@@ -225,53 +477,6 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
     )
     return fig
 
-def create_complexity_binned_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
-    """Create binned complexity chart with 0.25 bins"""
-    # Create complexity bins
-    complexity_bins = np.arange(1, 5.5, 0.25)
-    df_binned = df_filtered.copy()
-    df_binned['complexity_bin'] = pd.cut(df_binned['GameWeight'], bins=complexity_bins, include_lowest=True)
-    
-    # Aggregate by complexity bins
-    agg_data = df_binned.groupby('complexity_bin').agg({
-        'AvgRating': 'mean',
-        'GameWeight': 'mean',
-        'Name': 'count'
-    }).reset_index()
-    agg_data = agg_data.dropna()
-    
-    fig = go.Figure()
-    
-    # Main aggregated points
-    fig.add_trace(go.Scatter(
-        x=agg_data["GameWeight"],
-        y=agg_data["AvgRating"], 
-        mode='markers+lines',
-        marker=dict(
-            size=agg_data["Name"] * 2 + 8,
-            color=CHART_COLORS[0], 
-            opacity=0.7,
-            line=dict(width=2, color='white')
-        ),
-        line=dict(color=CHART_COLORS[0], width=2),
-        text=agg_data["Name"],
-        customdata=agg_data["GameWeight"],
-        hovertemplate="<b>Complexity %{customdata:.2f}</b><br>Average Rating: %{y:.2f}<br>Games: %{text}<extra></extra>",
-        name="Binned Averages",
-        showlegend=True
-    ))
-    
-    fig.update_layout(
-        title="Complexity vs Rating (Binned Averages)",
-        xaxis_title="Complexity (1=Simple, 5=Very Complex)",
-        yaxis_title="Average Player Rating",
-        plot_bgcolor=CHART_BG,
-        paper_bgcolor=CHART_BG,
-        height=400,
-        font_color=MUTED
-    )
-    return fig
-
 def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
     fig = go.Figure()
     
@@ -287,9 +492,9 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
         showlegend=True
     ))
     
-    # Add non-linear trend line (polynomial)
+    # Add trend line
     if len(df_filtered) > 5:
-        z = np.polyfit(df_filtered["Year Published"], df_filtered["AvgRating"], 2)  # Quadratic
+        z = np.polyfit(df_filtered["Year Published"], df_filtered["AvgRating"], 1)
         p = np.poly1d(z)
         trend_x = np.linspace(df_filtered["Year Published"].min(), df_filtered["Year Published"].max(), 100)
         fig.add_trace(go.Scatter(
@@ -297,7 +502,7 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
             y=p(trend_x),
             mode='lines',
             line=dict(color=CHART_COLORS[5], width=3, dash='dash'),
-            name='Growth Trend',
+            name='Trend Line',
             showlegend=True
         ))
     
@@ -325,50 +530,10 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
     )
     return fig
 
-def create_year_line_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
-    """Create line chart with yearly averages"""
-    # Aggregate by year
-    yearly_agg = df_filtered.groupby("Year Published").agg({
-        "AvgRating": "mean",
-        "Name": "count"
-    }).reset_index()
-    
-    fig = go.Figure()
-    
-    # Main line chart
-    fig.add_trace(go.Scatter(
-        x=yearly_agg["Year Published"],
-        y=yearly_agg["AvgRating"],
-        mode='lines+markers',
-        marker=dict(
-            size=yearly_agg["Name"] / 2 + 6,
-            color=CHART_COLORS[2], 
-            line=dict(width=2, color='white')
-        ),
-        line=dict(color=CHART_COLORS[2], width=3),
-        text=yearly_agg["Name"],
-        customdata=yearly_agg["Year Published"],
-        hovertemplate="<b>Year %{customdata}</b><br>Average Rating: %{y:.2f}<br>Games Released: %{text}<extra></extra>",
-        name="Yearly Averages",
-        showlegend=True
-    ))
-    
-    fig.update_layout(
-        title="Rating Evolution by Year (Connected)",
-        xaxis_title="Year Published",
-        yaxis_title="Average Player Rating",
-        plot_bgcolor=CHART_BG,
-        paper_bgcolor=CHART_BG,
-        height=400,
-        font_color=MUTED
-    )
-    return fig
-
 def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
-    """Create year vs rating bubble chart with one bubble per year (aggregated)"""
     # Aggregate by year - one bubble per year
     yearly_agg = df_filtered.groupby("Year Published").agg({
-        "AvgRating": "mean",
+        "BayesAvgRating": "mean",
         "GameWeight": "mean", 
         "Owned Users": "mean",
         "Name": "count"
@@ -377,18 +542,17 @@ def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
     
     fig = go.Figure()
     
-    # Main data points - one per year
     fig.add_trace(go.Scatter(
         x=yearly_agg["Year Published"],
-        y=yearly_agg["AvgRating"],
+        y=yearly_agg["BayesAvgRating"],
         mode='markers',
         marker=dict(
-            size=yearly_agg["Game Count"] * 2 + 10,  # Size by game count
-            color=yearly_agg["GameWeight"],  # Color by complexity
+            size=yearly_agg["GameWeight"] * 8 + 10,
+            color=yearly_agg["Game Count"],
             colorscale="Viridis",
             opacity=0.8,
             line=dict(width=2, color='white'),
-            colorbar=dict(title="Avg Complexity", x=1.02)
+            colorbar=dict(title="Games Released", x=1.02)
         ),
         text=yearly_agg["Year Published"],
         customdata=np.column_stack((yearly_agg["GameWeight"], yearly_agg["Game Count"], yearly_agg["Owned Users"])),
@@ -401,24 +565,9 @@ def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
         showlegend=True
     ))
     
-    # Add non-linear trend line (polynomial)
-    if len(yearly_agg) > 5:
-        z = np.polyfit(yearly_agg["Year Published"], yearly_agg["AvgRating"], 2)  # Quadratic
-        p = np.poly1d(z)
-        trend_x = np.linspace(yearly_agg["Year Published"].min(), yearly_agg["Year Published"].max(), 100)
-        fig.add_trace(go.Scatter(
-            x=trend_x,
-            y=p(trend_x),
-            mode='lines',
-            line=dict(color=CHART_COLORS[6], width=3, dash='dash'),
-            name='Growth Trend',
-            showlegend=True
-        ))
-    
-    # Highlight specific years if neighbors provided
     if highlight_neighbors is not None and len(highlight_neighbors) > 0:
         neighbor_years = highlight_neighbors.groupby("Year Published").agg({
-            "AvgRating": "mean",
+            "BayesAvgRating": "mean",
             "GameWeight": "mean",
             "Name": "count"
         }).reset_index()
@@ -426,10 +575,10 @@ def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
         
         fig.add_trace(go.Scatter(
             x=neighbor_years["Year Published"],
-            y=neighbor_years["AvgRating"],
+            y=neighbor_years["BayesAvgRating"],
             mode='markers',
             marker=dict(
-                size=neighbor_years["Game Count"] * 2 + 15,
+                size=neighbor_years["GameWeight"] * 8 + 15,
                 color=ACCENT,
                 opacity=0.9,
                 line=dict(width=3, color='white')
@@ -445,7 +594,7 @@ def create_bubble_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
         ))
     
     fig.update_layout(
-        title="Market Trends by Year (Bubble Size = Game Count, Color = Complexity)",
+        title="Market Trends by Year (Bubble Size = Complexity, Color = Game Count)",
         xaxis_title="Year Published",
         yaxis_title="Average Rating",
         plot_bgcolor=CHART_BG,
@@ -460,37 +609,37 @@ PROFILE_PRESETS = {
     "Family Party": {
         "cats": ["Cat:Family", "Cat:Party"],
         "mechs_on": ["Set Collection", "Hand Management", "Voting", "Take That"],
-        "year": 2022, "min_players": 3, "max_players": 4, "play_time": 30, "min_age": 8, "weight": 1.8
+        "year": CURRENT_YEAR, "min_players": 3, "max_players": 8, "play_time": 30, "min_age": 8, "weight": 1.8
     },
     "Cooperative Strategy": {
-        "cats": ["Cat:Thematic", "Cat:Strategy", "Fantasy"],
-        "mechs_on": ["Cooperative Game", "Action Points", "Variable Player Powers", "Dice Rolling"],
-        "year": 2022, "min_players": 1, "max_players": 4, "play_time": 60, "min_age": 12, "weight": 2.6
+        "cats": ["Cat:Thematic", "Cat:Strategy"],
+        "mechs_on": ["Cooperative Game", "Action Points", "Variable Player Powers"],
+        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4, "play_time": 60, "min_age": 12, "weight": 2.6
     },
     "Heavy Euro": {
         "cats": ["Cat:Strategy", "Economic"],
-        "mechs_on": ["Network and Route Building", "Market", "Tech Trees / Tech Tracks", "Worker Placement", "Dice Rolling"],
-        "year": 2022, "min_players": 2, "max_players": 4, "play_time": 120, "min_age": 14, "weight": 3.6
+        "mechs_on": ["Network and Route Building", "Market", "Tech Trees / Tech Tracks", "Worker Placement"],
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4, "play_time": 120, "min_age": 14, "weight": 3.6
     },
     "Thematic Adventure": {
         "cats": ["Cat:Thematic", "Adventure", "Fantasy"],
         "mechs_on": ["Dice Rolling", "Tile Placement", "Variable Player Powers"],
-        "year": 2022, "min_players": 1, "max_players": 4, "play_time": 90, "min_age": 12, "weight": 2.7
+        "year": CURRENT_YEAR, "min_players": 1, "max_players": 4, "play_time": 90, "min_age": 12, "weight": 2.7
     },
     "Abstract Strategy": {
-        "cats": ["Cat:Abstract", "Cat:Strategy"],
-        "mechs_on": ["Grid Movement", "Pattern Building", "Area Majority / Influence", "Dice Rolling"],
-        "year": 2022, "min_players": 2, "max_players": 4, "play_time": 20, "min_age": 10, "weight": 2.0
+        "cats": ["Cat:Abstract"],
+        "mechs_on": ["Grid Movement", "Pattern Building", "Area Majority / Influence"],
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 2, "play_time": 20, "min_age": 10, "weight": 2.0
     },
     "Deckbuilder": {
-        "cats": ["Cat:CGS", "Fantasy"],
-        "mechs_on": ["Deck Construction", "Hand Management", "Set Collection", "Dice Rolling"],
-        "year": 2022, "min_players": 2, "max_players": 4, "play_time": 45, "min_age": 10, "weight": 2.3
+        "cats": ["Cat:CGS"],
+        "mechs_on": ["Deck Construction", "Hand Management", "Set Collection"],
+        "year": CURRENT_YEAR, "min_players": 2, "max_players": 4, "play_time": 45, "min_age": 10, "weight": 2.3
     },
     "Social Deduction": {
         "cats": ["Cat:Party"],
-        "mechs_on": ["Hidden Roles", "Voting", "Player Elimination", "Dice Rolling"],
-        "year": 2022, "min_players": 5, "max_players": 4, "play_time": 20, "min_age": 10, "weight": 1.7
+        "mechs_on": ["Hidden Roles", "Voting", "Player Elimination"],
+        "year": CURRENT_YEAR, "min_players": 5, "max_players": 10, "play_time": 20, "min_age": 10, "weight": 1.7
     },
 }
 
@@ -508,21 +657,140 @@ def suggest_from_preset(df: pd.DataFrame, preset_key: str) -> Dict:
             mask &= (df[cat] == 1) | (df[cat] == True)
     
     return {
-        "Year Published": preset.get("year", 2022),
+        "Year Published": preset.get("year", CURRENT_YEAR),
         "Min Players": int(round(median_if_available(df, "Min Players", mask, preset.get("min_players", 2)) or 2)),
         "Max Players": int(round(median_if_available(df, "Max Players", mask, preset.get("max_players", 4)) or 4)),
         "Play Time": int(round(median_if_available(df, "Play Time", mask, preset.get("play_time", 60)) or 60)),
         "Min Age": int(round(median_if_available(df, "Min Age", mask, preset.get("min_age", 10)) or 10)),
         "GameWeight": float(median_if_available(df, "GameWeight", mask, preset.get("weight", 2.5)) or 2.5),
-        "BestPlayers": 4,
-        "mechs_on": preset.get("mechs_on", ["Dice Rolling"]),
-        "cats": preset.get("cats", ["Cat:Strategy", "Fantasy"]),
+        "mechs_on": preset.get("mechs_on", []),
+        "cats": preset.get("cats", []),
     }
+############ mechanics & themes helpers ############
+def get_mechanic_columns(df: pd.DataFrame) -> list[str]:
+    # capture both one-hot prefixed and common plain columns
+    base = [
+        "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
+        "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers",
+        "Hidden Roles", "Voting", "Pattern Building", "Area Majority / Influence",
+        "Network and Route Building", "Market", "Tech Trees / Tech Tracks", "Tile Placement"
+    ]
+    cols = [c for c in df.columns if c.startswith("Mechanic_")] + [c for c in base if c in df.columns]
+    # dedupe & sort nicely
+    seen, out = set(), []
+    for c in cols:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return sorted(out)
+
+def get_theme_columns(df: pd.DataFrame) -> list[str]:
+    base = ["Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"]
+    cols = [c for c in df.columns if c.startswith("Cat:")] + [c for c in base if c in df.columns]
+    seen, out = set(), []
+    for c in cols:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return sorted(out)
+
+def _is_on(series: pd.Series) -> pd.Series:
+    # treat 1/True as on; anything else off
+    return pd.to_numeric(series, errors="coerce").fillna(0).astype(float).eq(1.0) | series.astype(str).str.lower().isin(["true","yes"])
+    
+def _bucket_rating(x: float) -> str:
+    if pd.isna(x): return ""
+    if x >= 7.8: return "elite rated"
+    if x >= 7.2: return "well rated"
+    if x >= 6.5: return "solid"
+    return "lower rated"
+
+def _bucket_complexity(x: float) -> str:
+    if pd.isna(x): return ""
+    if x < 2.0: return "simple"
+    if x < 3.0: return "medium"
+    return "complex"
+
+def _bucket_duration(hours: float) -> str:
+    if pd.isna(hours): return ""
+    if hours < 0.75: return "short"
+    if hours < 1.75: return "mid length"
+    return "long"
+
+def _popularity_word(median_owners: float, overall_median: float) -> str:
+    if pd.isna(median_owners) or pd.isna(overall_median): return ""
+    if median_owners >= overall_median * 1.4: return "popular"
+    if median_owners <= max(1.0, overall_median * 0.6): return "niche"
+    return ""
+
+def _top_signals(cluster_df: pd.DataFrame, kind: str, min_share: float, limit: int) -> list[str]:
+    """kind in {'theme','mech'}; returns top column names cleaned."""
+    if kind == "theme":
+        cols = [c for c in cluster_df.columns if c.startswith(('Cat:', 'Fantasy', 'Adventure', 'Economic', 'Science Fiction', 'War', 'Horror'))]
+    else:
+        cols = [c for c in cluster_df.columns if c.startswith('Mechanic_') or c in ['Dice Rolling','Hand Management','Set Collection','Worker Placement','Cooperative Game','Deck Construction','Action Points','Variable Player Powers']]
+    shares = []
+    n = max(1, len(cluster_df))
+    for c in cols:
+        try:
+            share = float(pd.to_numeric(cluster_df[c], errors="coerce").fillna(0).mean())
+        except Exception:
+            share = 0.0
+        if share >= min_share:
+            shares.append((c, share))
+    shares.sort(key=lambda t: t[1], reverse=True)
+    names = []
+    for c, _ in shares[:limit]:
+        name = c.replace('Cat:', '').replace('Mechanic_', '').replace('_', ' ').strip()
+        names.append(name)
+    return names
+
+def generate_cluster_name(cluster_id: int, cluster_df: pd.DataFrame, overall_df: pd.DataFrame) -> str:
+    avg_rating = float(pd.to_numeric(cluster_df.get("AvgRating"), errors="coerce").mean())
+    avg_weight = float(pd.to_numeric(cluster_df.get("GameWeight"), errors="coerce").mean())
+    avg_hours  = float(pd.to_numeric(cluster_df.get("Play Time Hours"), errors="coerce").mean())
+    med_owners = float(pd.to_numeric(cluster_df.get("Owned Users"), errors="coerce").median())
+
+    overall_med_owners = float(pd.to_numeric(overall_df.get("Owned Users"), errors="coerce").median())
+
+    words = []
+    pop = _popularity_word(med_owners, overall_med_owners)
+    if pop: words.append(pop)
+
+    r = _bucket_rating(avg_rating)
+    if r: words.append(r)
+
+    c = _bucket_complexity(avg_weight)
+    if c: words.append(c)
+
+    d = _bucket_duration(avg_hours)
+    if d: words.append(d)
+
+    # Prefer themes first, fall back to mechanics
+    themes = _top_signals(cluster_df, kind="theme", min_share=0.40, limit=2)
+    mechs  = _top_signals(cluster_df, kind="mech",  min_share=0.35, limit=1)
+
+    topic_bits = []
+    if themes:
+        topic_bits.append(", ".join(themes))
+    elif mechs:
+        topic_bits.append(", ".join(mechs))
+
+    tail = ""
+    if topic_bits:
+        # turn theme words into a compact noun phrase (e.g., "strategy, economic")
+        tail = f" {topic_bits[0].lower()}"
+
+    body = " ".join([w for w in words if w])
+    body = body.strip() if body else "mixed"
+
+    return f"Type {cluster_id}: {body}{(' ' if body and tail else '')}games{tail}"
 
 # Sidebar setup
 st.sidebar.title("🎲 Game Data Controls")
 uploaded = st.sidebar.file_uploader("Upload dataset (CSV or Parquet)", type=["csv", "parquet"])
 df = load_df(uploaded)
+# derive mechanic & theme options (once, from the loaded data)
+MECH_OPTIONS = get_mechanic_columns(df)
+THEME_OPTIONS = get_theme_columns(df)
 
 # Convert play time to hours for better scale handling
 def convert_play_time_to_hours(df):
@@ -543,8 +811,6 @@ weight_col = "GameWeight"
 min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
 
 # Convert play time to hours for filtering
-df_with_hours = convert_play_time_to_hours(df)
-ptime_col_hours = "Play Time Hours"
 min_t_hrs, max_t_hrs = 0.25, 6.0  # 15 minutes to 6 hours default range
 
 k = st.sidebar.slider("Number of clusters", 2, 15, 8, step=1)
@@ -556,6 +822,26 @@ wt_rng = st.sidebar.slider("Complexity range", float(math.floor(min_w)), float(m
 pt_rng_hrs = st.sidebar.slider("Play time range (hours)", 
                                min_t_hrs, max_t_hrs, (0.25, 5.0), step=0.25,
                                help="15 minute increments. Games over 6 hours are capped at 6.")
+# Players & age
+pl_min, pl_max = st.sidebar.slider(
+    "Player count (min to max)", 1, 12,
+    (int(df["Min Players"].min()) if "Min Players" in df else 1,
+     int(min(12, (df["Max Players"].max() if "Max Players" in df else 8)))),
+    help="Filters games whose player ranges intersect this range."
+)
+
+min_age_min = int(df["Min Age"].min()) if "Min Age" in df else 3
+min_age_max = int(df["Min Age"].max()) if "Min Age" in df else 18
+age_rng = st.sidebar.slider("Minimum age", min_age_min, min_age_max, (min_age_min, min(14, min_age_max)))
+
+# Mechanics & themes
+with st.sidebar.expander("Mechanics & Themes", expanded=False):
+    mech_match_mode = st.radio("Mechanics must match:", ["Any", "All"], horizontal=True)
+    selected_mechs_global = st.multiselect("Select mechanics", MECH_OPTIONS, default=[])
+    theme_match_mode = st.radio("Themes must match:", ["Any", "All"], horizontal=True, key="theme_match_mode")
+    selected_themes_global = st.multiselect("Select themes/categories", THEME_OPTIONS, default=[])
+
+st.sidebar.caption("These filters apply to the Analytics Dashboard, Cluster Map, and Cluster Explorer.")
 
 # Convert hour range back to minutes for filtering
 pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
@@ -577,8 +863,46 @@ mask = pd.Series(True, index=view.index)
 mask &= view[year_col].between(yr_rng[0], yr_rng[1])
 mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
 mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])  # Filter using original minutes
-view_f = view[mask].copy()
+# Player range intersection: keep games that overlap requested range
+if all(col in view.columns for col in ["Min Players", "Max Players"]):
+    # a game's [Min, Max] intersects the selected [pl_min, pl_max]
+    mask &= (view["Max Players"] >= pl_min) & (view["Min Players"] <= pl_max)
 
+# Minimum age
+if "Min Age" in view.columns:
+    mask &= view["Min Age"].between(age_rng[0], age_rng[1])
+
+# Mechanics filter
+if selected_mechs_global:
+    mech_masks = []
+    for m in selected_mechs_global:
+        if m in view.columns:
+            mech_masks.append(_is_on(view[m]))
+    if mech_masks:
+        mech_stack = pd.concat(mech_masks, axis=1)
+        mech_ok = mech_stack.any(axis=1) if mech_match_mode == "Any" else mech_stack.all(axis=1)
+        mask &= mech_ok
+
+# Themes filter
+if selected_themes_global:
+    theme_masks = []
+    for t in selected_themes_global:
+        if t in view.columns:
+            theme_masks.append(_is_on(view[t]))
+    if theme_masks:
+        theme_stack = pd.concat(theme_masks, axis=1)
+        theme_ok = theme_stack.any(axis=1) if theme_match_mode == "Any" else theme_stack.all(axis=1)
+        mask &= theme_ok
+
+view_f = view[mask].copy()
+if view_f.empty:
+    st.warning("No games match the current filters. Adjust the filters to see data.")
+    st.stop()
+
+# Build cluster name map for the current filtered view
+cluster_name_map = {cid: generate_cluster_name(cid, view_f[view_f["Cluster"] == cid], view_f)
+                    for cid in sorted(view_f["Cluster"].unique())}
+    
 # Header
 st.title("🎲 Board Game Developer Console")
 st.markdown("**Analyze market trends, test game concepts, and discover opportunities in the board game space**")
@@ -628,18 +952,6 @@ with tab_dashboard:
     with col2:
         fig2 = create_year_vs_rating_chart(view_f)
         st.plotly_chart(fig2, use_container_width=True)
-    
-    # Additional analysis charts
-    st.markdown("### 📈 Trend Analysis")
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        fig3 = create_complexity_binned_chart(view_f)
-        st.plotly_chart(fig3, use_container_width=True)
-        
-    with col4:
-        fig4 = create_year_line_chart(view_f)
-        st.plotly_chart(fig4, use_container_width=True)
     
     st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
     st.markdown("### 🔍 Key Market Insights")
@@ -704,7 +1016,7 @@ with tab_wizard:
         min_age = c5.number_input("Min Age", value=int(auto["Min Age"]), step=1)
         weight = c6.number_input("Complexity (1-5)", value=float(auto["GameWeight"]), step=0.1, format="%.1f")
         kickstarted = c7.selectbox("Kickstarted?", ["No", "Yes"], index=0)
-        best_players = c8.number_input("Best Player Count", value=int(auto["BestPlayers"]), step=1, help="Leave 0 if unknown")
+        best_players = c8.number_input("Best Player Count", value=0, step=1, help="Leave 0 if unknown")
 
         X_cols = list(X_all.columns)
         mech_cols = sorted([c for c in X_cols if c.startswith("Mechanic_") or c in [
@@ -756,14 +1068,14 @@ with tab_wizard:
             if t in X_cols:
                 profile[t] = 1
 
-        # Create input vector
-        x_input = build_input_vector(X_cols, profile)
-        x_scaled = scaler.transform(x_input)
-        assigned_cluster = int(kmeans.predict(x_scaled)[0])
+        # Use clustering scaler (for clustering only)
+        x_input_cluster = build_input_vector(list(X_all.columns), profile)
+        x_scaled_cluster = scaler.transform(x_input_cluster)
+        assigned_cluster = int(kmeans.predict(x_scaled_cluster)[0])
 
         # Get neighbors
         neighbors = nearest_neighbors_in_cluster(
-            x_scaled, assigned_cluster, view, X_all, scaler, kmeans, topn=topn
+            x_scaled_cluster, assigned_cluster, view, X_all, scaler, kmeans, topn=topn
         )
 
         st.markdown("---")
@@ -775,7 +1087,7 @@ with tab_wizard:
         
         models = load_models(MODEL_PATHS)
         if models:
-            preds = predict_with_models(models, x_input)
+            preds = predict_with_models(models, profile)
             
             pred_col1, pred_col2 = st.columns(2)
             with pred_col1:
@@ -811,8 +1123,10 @@ with tab_wizard:
 
         positioning_insights = []
         
-        concept_weight = float(x_input.iloc[0].get("GameWeight", np.nan))
+        concept_weight = float(profile.get("GameWeight", np.nan))
         cluster_weight = med("GameWeight")
+
+        
         if np.isfinite(concept_weight) and np.isfinite(cluster_weight):
             if concept_weight > cluster_weight + 0.4:
                 positioning_insights.append("🧩 **Higher complexity** than similar games → Appeals to hardcore gamers but smaller market")
@@ -821,7 +1135,7 @@ with tab_wizard:
             else:
                 positioning_insights.append("⚖️ **Complexity aligns** with similar games → Good market fit")
 
-        concept_time = float(x_input.iloc[0].get("Play Time", np.nan))
+        concept_time = float(profile.get("Play Time", np.nan))
         cluster_time = med("Play Time")
         if np.isfinite(concept_time) and np.isfinite(cluster_time):
             if concept_time > cluster_time + 30:
@@ -1039,7 +1353,7 @@ with tab_map:
                 top_themes.append(theme_name)
         
         cluster_stats.append({
-            "Group": f"Type {cluster_id}",
+            "Group": cluster_name_map.get(cluster_id, f"Type {cluster_id}"),
             "Games": len(cluster_data),
             "Avg Rating": f"{cluster_data['AvgRating'].mean():.2f}",
             "Avg Complexity": f"{cluster_data['GameWeight'].mean():.1f}",
@@ -1058,19 +1372,31 @@ with tab_explore:
     explore_col1, explore_col2 = st.columns([1, 2])
     
     with explore_col1:
-        cluster_pick = st.selectbox("Choose a game type to explore:", 
-                                   sorted(view_f["Cluster"].unique()),
-                                   format_func=lambda x: f"Type {x}")
+        clusters_available = sorted(view_f["Cluster"].unique())
+        if len(clusters_available) == 0:
+            st.info("No clusters available with current filters.")
+            st.stop()
+        
+        # Use pretty names
+        def _fmt_cluster(x: int) -> str:
+            return cluster_name_map.get(x, f"Type {x}")
+        
+        cluster_pick = st.selectbox(
+            "Choose a game type to explore:",
+            clusters_available,
+            format_func=_fmt_cluster
+        )
         
         cluster_data = view_f[view_f["Cluster"] == cluster_pick].copy()
         
-        st.markdown(f"### 📋 Type {cluster_pick} Summary")
+        st.markdown(f"### 📋 {_fmt_cluster(cluster_pick)}")
         st.metric("**Games in this type**", len(cluster_data))
         st.metric("**Average player rating**", f"{cluster_data['AvgRating'].mean():.2f}")
         st.metric("**Typical complexity**", f"{cluster_data['GameWeight'].mean():.1f} / 5.0")
         st.metric("**Average game length**", f"{cluster_data['Play Time Hours'].mean():.1f} hours")
         
         st.markdown("**🎮 What defines this type:**")
+
         
         theme_cols = [c for c in cluster_data.columns if c.startswith(('Cat:', 'Fantasy', 'Adventure', 'Economic', 'War', 'Horror'))]
         dominant_themes = []
@@ -1180,3 +1506,11 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
+
+
+
+
+
+
+
