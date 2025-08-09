@@ -115,7 +115,7 @@ h1, h2, h3, h4 {{ color: {ACCENT}; font-family: 'Georgia', serif; }}
 # Configuration
 DEFAULT_PARQUET_PATH = "cleaned_large_bgg_dataset.parquet"
 DEFAULT_CSV_PATH = "cleaned_large_bgg_dataset.csv"
-CURRENT_YEAR = 2025
+CURRENT_YEAR = 2022
 
 EXCLUDE_FOR_CLUSTERING = [
     "Owned Users", "BayesAvgRating", "AvgRating", "Users Rated", "BGG Rank", 
@@ -1853,6 +1853,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
