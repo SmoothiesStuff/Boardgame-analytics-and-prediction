@@ -2528,21 +2528,6 @@ with tab_synergies:
         fig_network = build_mech_network_fig_static(synergies, top_n=30)
         st.plotly_chart(fig_network, use_container_width=True)
         
-        if events:
-            ev = events[0]
-            if ev.get("curveNumber") == node_curve_idx:
-                idx = ev.get("pointIndex")
-                if idx is not None and 0 <= idx < len(node_names):
-                    st.session_state[sel_key] = node_names[idx]
-                    st.experimental_rerun()
-        
-        c1, c2 = st.columns([1,1])
-        with c1:
-            if st.button("Reset highlight"):
-                st.session_state.pop(sel_key, None)
-                st.experimental_rerun()
-        with c2:
-            if selected_node:
                 st.caption(f"Focused on: **{selected_node}**")
         narr("""
         **Mechanics that work.** Certain combinations produce clean decision space—worker placement with a market, 
@@ -2643,6 +2628,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
