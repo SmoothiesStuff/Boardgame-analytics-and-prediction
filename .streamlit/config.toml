@@ -1,3 +1,13 @@
+[server]
+fileWatcherType = "poll"                # avoid inotify
+folderWatchBlacklist = [
+  ".git", "venv", "env", ".venv",       # virtualenv + git
+  "__pycache__", ".cache",               # caches
+  "models", "data", "datasets",          # large dirs in your repo (adjust as needed)
+  "node_modules"
+]
+headless = true
+
 [theme]
 base="light"
 primaryColor="#5E7A61"
