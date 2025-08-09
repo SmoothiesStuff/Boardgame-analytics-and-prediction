@@ -295,6 +295,24 @@ def _nice_list(words, max_n=2):                                                #
     words = [w for w in words if w]
     return " + ".join(words[:max_n]) if words else ""
 
+def toggle_feature(profile: dict, X_cols, on: bool, names):
+    """Flip a binary feature to 1 only if it exists in X_all.
+       Supports exact name (e.g., 'Cooperative Game') and Mechanic_ prefixed versions."""
+    if not on:
+        return
+    if isinstance(names, str):
+        names = [names]
+    cols = set(X_cols)
+    for name in names:
+        candidates = [
+            name,
+            f"Mechanic_{name.replace(' ', '_')}",
+        ]
+        for c in candidates:
+            if c in cols:
+                profile[c] = 1
+                break
+
 def _top_diff_features(cluster_df, all_df, startswith, min_prop=0.25, max_show=2):
     cols = [c for c in cluster_df.columns if c.startswith(startswith)]
     if not cols:
@@ -1240,18 +1258,24 @@ with tab_wizard:
         additional_cols = st.columns(3)
         
         with additional_cols[0]:
-            solo_mode = st.checkbox("Include Solo Mode", value=min_players == 1)
-            campaign_mode = st.checkbox("Campaign/Legacy Elements", value=False)
+            solo_mode = st.checkbox("Include Solo Mode", value=(min_players == 1))
         
         with additional_cols[1]:
-            expansion_ready = st.checkbox("Expansion-Ready Design", value=True)
-            app_integration = st.checkbox("Companion App", value=False)
+            coop_toggle = st.checkbox("Co-op (team vs game)", value=False)
+            vpp_toggle = st.checkbox("Variable Player Powers", value=False)
         
+        with additional_cols[2]:
+            deck_toggle = st.checkbox("Deck Construction", value=False)
+            worker_toggle = st.checkbox("Worker Placement", value=False)
+            hidden_roles_toggle = st.checkbox("Hidden Roles", value=False)
+        
+        # keep your pricing controls as-is (these don't affect prediction features)
         with additional_cols[2]:
             target_price = st.slider("Target MSRP ($)", 20, 150, 50, 5)
             component_quality = st.select_slider("Component Quality",
                                                 ["Basic", "Good", "Premium"],
                                                 value="Good")
+
         narr("""
     **Design first principles.** Start from three anchors. Target complexity that invites thinking without confusion. Land the core loop in 60 to 90 minutes. Aim the minimum age at 10 so families and hobby tables overlap. From there, pick one mechanic that does the heavy lifting and one that creates emergent texture. Resist adding a third that just adds rules.
     """)
@@ -1279,6 +1303,18 @@ with tab_wizard:
         for theme in selected_themes:
             if theme in X_all.columns:
                 profile[theme] = 1
+
+        # Solo mode: model-safe signal -> Min Players = 1
+        if solo_mode:
+            profile["Min Players"] = 1
+        
+        # Mechanic toggles (only set if column exists)
+        toggle_feature(profile, X_all.columns, coop_toggle, "Cooperative Game")
+        toggle_feature(profile, X_all.columns, vpp_toggle, "Variable Player Powers")
+        toggle_feature(profile, X_all.columns, deck_toggle, "Deck Construction")
+        toggle_feature(profile, X_all.columns, worker_toggle, "Worker Placement")
+        toggle_feature(profile, X_all.columns, hidden_roles_toggle, "Hidden Roles")
+        
         
         # Prepare input for clustering
         x_input = pd.DataFrame([{c: profile.get(c, 0) for c in X_all.columns}])
@@ -2400,6 +2436,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
