@@ -921,52 +921,77 @@ with tab_intel:
     # Market opportunity analysis
     st.markdown("### 🏆 Top Market Opportunities")
     opportunities = sorted(cluster_insights.items(), key=lambda x: x[1]["opportunity_score"], reverse=True)[:5]
-    # ---- Dual-axis bar chart: Opportunity (%) vs Avg Rating (0–10) ----
-    opp_labels = [cluster_labels.get(cid, f"Segment {cid}") for cid, _ in opportunities]
-    opp_scores = [data["opportunity_score"] for _, data in opportunities]          # 0–100
-    opp_avg_ratings = [cluster_insights[cid]["avg_rating"] for cid, _ in opportunities]  # 0–10
+    
+    # ---- Dual-axis grouped bars: Opportunity (%) vs Avg Rating (0–10) ----
+    def wrap_label(s: str, max_chars_per_line: int = 18, max_lines: int = 3) -> str:
+        """Word-wrap a label with <br> and optionally truncate with ellipsis if too long."""
+        words = s.split()
+        lines, cur = [], ""
+        for w in words:
+            if len(cur) + len(w) + (1 if cur else 0) <= max_chars_per_line:
+                cur = f"{cur} {w}".strip()
+            else:
+                lines.append(cur)
+                cur = w
+                if len(lines) == max_lines - 1:
+                    break
+        if cur:
+            lines.append(cur)
+        # If there are leftover words, add ellipsis
+        used_words = " ".join(lines).split()
+        if len(used_words) < len(words):
+            if len(lines) >= max_lines:
+                lines[-1] = (lines[-1] + "…").rstrip()
+        return "<br>".join(lines)
+    
+    opp_labels_raw = [cluster_labels.get(cid, f"Segment {cid}") for cid, _ in opportunities]
+    opp_labels_wrapped = [wrap_label(lbl, max_chars_per_line=18, max_lines=3) for lbl in opp_labels_raw]
+    opp_scores = [data["opportunity_score"] for _, data in opportunities]               # 0–100
+    opp_avg_ratings = [cluster_insights[cid]["avg_rating"] for cid, _ in opportunities] # 0–10
     
     fig_opp_bar = make_subplots(specs=[[{"secondary_y": True}]])
     
-    # Left axis (primary): Opportunity %
+    # Left axis: Opportunity %
     fig_opp_bar.add_trace(
         go.Bar(
-            x=opp_labels,
+            x=opp_labels_wrapped,
             y=opp_scores,
-            name="Opportunity Score (%)",
+            name="Opportunity (%)",
             marker_color=SUCCESS_COLOR,
-            opacity=0.85
+            opacity=0.9
         ),
         secondary_y=False
     )
     
-    # Right axis (secondary): Avg Rating 0–10
+    # Right axis: Avg Rating (0–10)
     fig_opp_bar.add_trace(
         go.Bar(
-            x=opp_labels,
+            x=opp_labels_wrapped,
             y=opp_avg_ratings,
             name="Avg Rating (0–10)",
             marker_color=CHART_COLORS[1],
-            opacity=0.75
+            opacity=0.8
         ),
         secondary_y=True
     )
     
     fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100], secondary_y=False)
     fig_opp_bar.update_yaxes(title_text="Avg Rating (0–10)", range=[0, 10], secondary_y=True)
-    fig_opp_bar.update_xaxes(title_text="Top Segments", tickangle=-15)
+    fig_opp_bar.update_xaxes(title_text="", tickangle=0)
     
     fig_opp_bar.update_layout(
-        height=360,
-        barmode="group",                      # group the two bars per segment
+        height=380,
+        barmode="group",                 # <— grouped (separate) bars, NOT stacked
+        bargap=0.25,
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         font_color=MUTED,
         legend_title_text="",
-        margin=dict(t=30, b=30, l=10, r=10)
+        margin=dict(t=30, b=60, l=10, r=10),  # extra bottom for multi-line ticks
     )
     
     st.plotly_chart(fig_opp_bar, use_container_width=True)
+    # -------------------------------------------------------------------
     # -------------------------------------------------------------------
     opp_cols = st.columns(len(opportunities))
     for i, (cluster_id, data) in enumerate(opportunities):
@@ -2310,6 +2335,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
