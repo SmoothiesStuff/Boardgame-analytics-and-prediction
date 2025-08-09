@@ -714,7 +714,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Set Collection", "Dice Rolling"],
         "year": CURRENT_YEAR, "min_players": 3, "max_players": 8,
         "play_time": 30, "min_age": 8, "weight": 1.7,
-        "market_insight": "Short, upbeat play with simple combos tends to travel well across groups."
+        "market_insight": "20–40 minutes with fast turns and readable components tends to rate best; delight beats depth here."
     },
     "🤝 Cooperative Strategy": {
         "description": "Team vs game with clear roles and powers",
@@ -722,7 +722,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Cooperative Game", "Variable Player Powers", "Action Points"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 60, "min_age": 12, "weight": 2.6,
-        "market_insight": "1–4 players with solo support and distinct roles is the common backbone."
+        "market_insight": "1–4 players with solo support and distinct roles sustain engagement; difficulty tuning matters more than length."
     },
     "🏛️ Heavy Euro Game": {
         "description": "Deep economic engines and tight efficiency puzzles",
@@ -730,7 +730,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Worker Placement", "Market", "Network and Route Building"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 120, "min_age": 14, "weight": 3.6,
-        "market_insight": "2–4 players, 90–150 minutes, and crisp resource tension dominate the space."
+        "market_insight": "90–150 minutes, scarce actions, and visible trade-offs correlate with higher ratings; minimize upkeep between turns."
     },
     "⚔️ Thematic Adventure": {
         "description": "Narrative-forward quests with progression",
@@ -738,7 +738,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Dice Rolling", "Tile Placement", "Variable Player Powers"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 90, "min_age": 12, "weight": 2.8,
-        "market_insight": "Story, progression, and 60–120 minute sessions are typical."
+        "market_insight": "Progression and optional solo widen the funnel; 60–120 minutes is the common landing zone."
     },
     "♟️ Abstract Strategy": {
         "description": "Low-luck, perfect-information duels",
@@ -746,7 +746,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Grid Movement", "Pattern Building", "Area Majority / Influence"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 2,
         "play_time": 25, "min_age": 10, "weight": 2.1,
-        "market_insight": "2-player, sub-30 minutes, tight tactical clarity."
+        "market_insight": "2-player, sub-30 minutes, and clean rules density drive reception; clarity per minute beats complexity."
     },
     "🃏 Deck Builder": {
         "description": "Card engines with incremental upgrades",
@@ -754,7 +754,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Deck Construction", "Hand Management", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 45, "min_age": 10, "weight": 2.3,
-        "market_insight": "2–4 players, 30–60 minutes, smooth upgrade cadence."
+        "market_insight": "2–4 players at 30–60 minutes feels most common; thin starts and steady upgrade tempo keep ratings up."
     },
     "🎭 Social Deduction": {
         "description": "Hidden teams, reads and bluffs",
@@ -762,7 +762,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Hidden Roles", "Voting", "Player Elimination"],
         "year": CURRENT_YEAR, "min_players": 6, "max_players": 10,
         "play_time": 20, "min_age": 10, "weight": 1.6,
-        "market_insight": "Larger tables, fast rounds, and role uncertainty define the genre."
+        "market_insight": "Larger tables and short rounds land best; limiting hard elimination improves sentiment."
     },
     "📝 Roll & Write": {
         "description": "Combo puzzles on a sheet, low upkeep",
@@ -770,7 +770,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Dice Rolling", "Pattern Building", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 1, "max_players": 4,
         "play_time": 25, "min_age": 8, "weight": 1.5,
-        "market_insight": "1–4 players, sub-30 minutes, satisfying combo spikes."
+        "market_insight": "1–4 players, 20–30 minutes, quick setup and satisfying chains are the winning pattern."
     },
     "🧩 Tile-Layer Euro": {
         "description": "Spatial drafting with gentle engine scoring",
@@ -778,7 +778,7 @@ PROFILE_PRESETS = {
         "mechs_on": ["Tile Placement", "Pattern Building", "Set Collection"],
         "year": CURRENT_YEAR, "min_players": 2, "max_players": 4,
         "play_time": 60, "min_age": 10, "weight": 2.3,
-        "market_insight": "2–4 players, 45–75 minutes, spatial scoring is the norm."
+        "market_insight": "2–4 players at 45–75 minutes with visible spatial scoring remains a reliable midweight lane."
     }
 }
 
@@ -2480,6 +2480,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
