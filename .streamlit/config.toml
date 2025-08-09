@@ -1,0 +1,10 @@
+[theme]
+base="light"
+primaryColor="#5E7A61"
+backgroundColor="#F8F6F0"
+secondaryBackgroundColor="#E7E3D4"
+textColor="#3A3A3A"
+font="serif"
+
+[global]
+hideTopBar=false
