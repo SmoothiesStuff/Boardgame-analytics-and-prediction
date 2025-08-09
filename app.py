@@ -1147,11 +1147,43 @@ with tab_wizard:
                 confidence = 75 + np.random.randint(-10, 15)
                 percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
             else:
-                # Real model predictions would go here
-                predicted_rating = 7.2
-                predicted_owners = 15000
-                confidence = 82
-                percentile = 75
+                # Use trained models
+                scaler_in = models.get("_input_scaler")
+            
+                # Pick feature list (prefer scaler feature names; fall back to model or X_all)
+                if scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
+                    training_cols = list(scaler_in.feature_names_in_)
+                elif "rating_xgb" in models and hasattr(models["rating_xgb"], "feature_names_in_"):
+                    training_cols = list(models["rating_xgb"].feature_names_in_)
+                elif "sales_xgb" in models and hasattr(models["sales_xgb"], "feature_names_in_"):
+                    training_cols = list(models["sales_xgb"].feature_names_in_)
+                else:
+                    training_cols = list(X_all.columns)
+            
+                X_pred = align_profile_to_training(profile, training_cols, scaler=scaler_in)
+            
+                # Predict rating
+                if "rating_xgb" in models:
+                    predicted_rating = float(models["rating_xgb"].predict(X_pred)[0])
+                else:
+                    predicted_rating = float(neighbors["AvgRating"].mean())
+            
+                # Predict owners
+                if "sales_xgb" in models:
+                    owners_pred = models["sales_xgb"].predict(X_pred)[0]
+                    # If your sales model was trained on log1p(owners), uncomment next line:
+                    # owners_pred = np.expm1(owners_pred)
+                    predicted_owners = int(max(0, owners_pred))
+                else:
+                    predicted_owners = int(neighbors["Owned Users"].median())
+            
+                # Percentile vs market
+                percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
+            
+                # Simple confidence from neighbor tightness (0–100 clip)
+                d = neighbors["__dist"]
+                denom = (d.std() if d.std() > 1e-6 else 1.0)
+                confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
             
             with pred_cols[0]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
@@ -2167,6 +2199,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
