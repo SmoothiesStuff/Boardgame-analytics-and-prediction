@@ -981,25 +981,27 @@ with tab_explore:
     explore_col1, explore_col2 = st.columns([1, 2])
     
     with explore_col1:
-    clusters_available = sorted(view_f["Cluster"].unique())
-    if len(clusters_available) == 0:
-        st.info("No clusters available with current filters.")
-        st.stop()
-    cluster_pick = st.selectbox(
-        "Choose a game type to explore:",
-        clusters_available,
-        format_func=lambda x: f"Type {x}"
-    )
-        
+        clusters_available = sorted(view_f["Cluster"].unique())
+        if len(clusters_available) == 0:
+            st.info("No clusters available with current filters.")
+            st.stop()
+
+        cluster_pick = st.selectbox(
+            "Choose a game type to explore:",
+            clusters_available,
+            format_func=lambda x: f"Type {x}"
+        )
+
         cluster_data = view_f[view_f["Cluster"] == cluster_pick].copy()
-        
+
         st.markdown(f"### 📋 Type {cluster_pick} Summary")
         st.metric("**Games in this type**", len(cluster_data))
         st.metric("**Average player rating**", f"{cluster_data['AvgRating'].mean():.2f}")
         st.metric("**Typical complexity**", f"{cluster_data['GameWeight'].mean():.1f} / 5.0")
         st.metric("**Average game length**", f"{cluster_data['Play Time Hours'].mean():.1f} hours")
-        
+
         st.markdown("**🎮 What defines this type:**")
+
         
         theme_cols = [c for c in cluster_data.columns if c.startswith(('Cat:', 'Fantasy', 'Adventure', 'Economic', 'War', 'Horror'))]
         dominant_themes = []
@@ -1109,5 +1111,6 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
