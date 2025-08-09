@@ -225,30 +225,90 @@ def _align_features(model, X_input_df: pd.DataFrame) -> pd.DataFrame:
         return X_input_df.reindex(columns=cols, fill_value=0)
     return X_input_df
 
-def predict_with_models(models: Dict, X_input_df: pd.DataFrame) -> Dict[str, float | None]:
+def predict_with_models(models: Dict, X_input_profile: Dict) -> Dict[str, float | None]:
+    """
+    X_input_profile is your dict of feature values (from the Wizard).
+    We will build the exact feature vector each model/scaler expects.
+    """
     out = {}
-    input_scaler = models.get("_input_scaler", None)
+    scaler_obj = models.get("_input_scaler", None)
 
+    # Get the canonical training columns (prefer scaler's)
+    training_cols = get_training_feature_names(models)
+    if not training_cols:
+        st.error("Models lack feature_names_in_. Re-save models with feature names or provide a column list.")
+        return {k: None for k in models.keys() if not k.startswith("_")}
+
+    # Build 1xN input matching training columns
+    Xvec = build_vector_for_columns(training_cols, X_input_profile)
+
+    # If we have a separate scaler (i.e., models are not Pipelines), transform now
+    Xvec_scaled = None
+    if scaler_obj is not None and not hasattr(scaler_obj, "named_steps"):
+        try:
+            Xvec_scaled = pd.DataFrame(scaler_obj.transform(Xvec), columns=Xvec.columns)
+        except Exception as e:
+            st.error(f"Scaler transform failed: {e}")
+            Xvec_scaled = Xvec.copy()
+    else:
+        Xvec_scaled = Xvec.copy()
+
+    # Predict per model (reindex in case each model uses a subset)
     for key, model in models.items():
-        if key.startswith("_"):  # skip helper objects like the scaler
+        if key.startswith("_"):
             continue
         try:
-            Xa = _align_features(model, X_input_df)
+            if hasattr(model, "feature_names_in_") and model.feature_names_in_ is not None:
+                cols = list(model.feature_names_in_)
+                Xm = Xvec_scaled.reindex(columns=cols, fill_value=0.0)
+            else:
+                Xm = Xvec_scaled
 
-            # If you saved the scaler separately (not inside a Pipeline), apply it
-            if input_scaler is not None and not hasattr(model, "named_steps"):
-                try:
-                    Xa = pd.DataFrame(input_scaler.transform(Xa), columns=Xa.columns)
-                except Exception as e:
-                    st.warning(f"Scaler transform failed for {key}: {e}")
-
-            pred = model.predict(Xa)
+            pred = model.predict(Xm)
             out[key] = float(pred[0])
         except Exception as e:
             st.error(f"Prediction failed for {key}: {e}")
             out[key] = None
 
     return out
+
+
+def get_training_feature_names(models: Dict) -> list[str]:
+    """
+    Prefer the scaler's training columns (if present), otherwise union of each model's feature_names_in_.
+    """
+    cols = []
+    scaler_obj = models.get("_input_scaler")
+    if hasattr(scaler_obj, "feature_names_in_"):
+        return list(scaler_obj.feature_names_in_)
+    for key, m in models.items():
+        if key.startswith("_"): 
+            continue
+        if hasattr(m, "feature_names_in_") and m.feature_names_in_ is not None:
+            cols.extend(list(m.feature_names_in_))
+    # de-dupe, preserve order
+    seen, out = set(), []
+    for c in cols:
+        if c not in seen:
+            seen.add(c); out.append(c)
+    return out
+
+def build_vector_for_columns(target_cols: list[str], profile: Dict) -> pd.DataFrame:
+    """
+    Create a 1-row DataFrame with EXACTLY target_cols.
+    Unspecified features default to 0.
+    """
+    # strip any app-engineered columns that don't belong in training
+    target_cols = [c for c in target_cols if c not in PRED_EXCLUDE]
+    base = {c: 0 for c in target_cols}
+    for k, v in profile.items():
+        if k in base:
+            base[k] = v
+    df = pd.DataFrame([base])[target_cols]
+    # coerce to numeric
+    for c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    return df
 
 # Visualization functions
 def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
@@ -895,10 +955,10 @@ with tab_wizard:
             if t in X_cols:
                 profile[t] = 1
 
-        # Create input vector
-        x_input = build_input_vector(X_cols, profile)
-        x_scaled = scaler.transform(x_input)
-        assigned_cluster = int(kmeans.predict(x_scaled)[0])
+        # Use clustering scaler (for clustering only)
+        x_input_cluster = build_input_vector(list(X_all.columns), profile)
+        x_scaled_cluster = scaler.transform(x_input_cluster)
+        assigned_cluster = int(kmeans.predict(x_scaled_cluster)[0]))
 
         # Get neighbors
         neighbors = nearest_neighbors_in_cluster(
@@ -914,7 +974,7 @@ with tab_wizard:
         
         models = load_models(MODEL_PATHS)
         if models:
-            preds = predict_with_models(models, x_input)
+            preds = predict_with_models(models, profile)
             
             pred_col1, pred_col2 = st.columns(2)
             with pred_col1:
@@ -1331,6 +1391,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
