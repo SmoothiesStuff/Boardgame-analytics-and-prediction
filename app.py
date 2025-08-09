@@ -179,6 +179,40 @@ NUMERIC_COLS = [
     "Year Published","Min Players","Max Players","Play Time","Min Age",
     "GameWeight","Kickstarted","BestPlayers","Rating Average","Complexity Average"
 ]
+# --- Theme discovery (only use columns present in X_all, so models align) ---
+THEME_CANDIDATES = [
+    # Core BGG “super-cats”
+    "Cat:Strategy", "Cat:Thematic", "Cat:Family", "Cat:Party", "Cat:Abstract", "Cat:Wargame",
+    # Broad/popular themes
+    "Cat:Fantasy", "Cat:Science Fiction", "Cat:Adventure", "Cat:Economic", "Cat:Horror", "Cat:War",
+    "Cat:City Building", "Cat:Civilization", "Cat:Animals", "Cat:Mythology", "Cat:Historical",
+    "Cat:Nautical", "Cat:Pirates", "Cat:Space Exploration", "Cat:Post-Apocalyptic", "Cat:Steampunk",
+    "Cat:Western", "Cat:Zombies", "Cat:Mystery", "Cat:Crime", "Cat:Humor",
+    # Domain/interest clusters
+    "Cat:Transportation", "Cat:Trains", "Cat:Aviation", "Cat:Automobile", "Cat:Sports", "Cat:Medical",
+    "Cat:Industry / Manufacturing", "Cat:Educational", "Cat:Environmental", "Cat:Travel",
+    # Format-ish categories you sometimes see in datasets
+    "Cat:Card Game", "Cat:Dice", "Cat:Miniatures", "Cat:Territory Building", "Cat:Negotiation",
+    # Non-prefixed fallbacks some datasets include
+    "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"
+]
+
+def discover_available_themes(X_cols, preset_cats=None, limit=60):
+    cols = set(X_cols)
+    # Only keep candidates that are real columns
+    base = [c for c in THEME_CANDIDATES if c in cols]
+    # Include any extra Cat: columns in your data we didn’t list
+    extras = sorted([c for c in cols if isinstance(c, str) and c.startswith("Cat:") and c not in base])
+    # Nudge preset categories to the front if present
+    preset = [c for c in (preset_cats or []) if c in cols]
+    # De-dup while preserving order: preset → base → extras
+    seen, ordered = set(), []
+    for group in (preset, base, extras):
+        for c in group:
+            if c not in seen:
+                ordered.append(c); seen.add(c)
+    return ordered[:limit]
+
 
 def align_profile_to_training(profile: dict, training_cols: list[str], scaler=None) -> pd.DataFrame:
     """Enhanced profile alignment with robust type handling and validation."""
@@ -438,7 +472,7 @@ def create_market_evolution_timeline(df: pd.DataFrame) -> go.Figure:
     
     fig = make_subplots(
         rows=3, cols=1,
-        subplot_titles=("Games Released per Year", "Average Quality Trends", "Market Characteristics"),
+        subplot_titles=("Games Released per Year", "Average Quality and Complexity", "Ownership Vs Playtime"),
         vertical_spacing=0.12,
         specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": True}]]
     )
@@ -1029,7 +1063,13 @@ with tab_intel:
             st.markdown('</div>', unsafe_allow_html=True)
 
     narr("""
-    **How to use these segments.** The Opportunity Score surfaces places where demand outpaces supply. The healthiest pockets tend to be moderate complexity with real decision space, 60 to 90 minutes, and a minimum age of 10. Co-op with solo support often doubles engagement because players can learn alone then bring the table along. If a segment is small and strong, it is not a red flag. It is a green light for a focused design that respects time and attention.
+    **How to use these segments.** The Opportunity Score is a weighted composite that highlights 
+    where healthy demand meets limited recent supply. It combines growth rate in releases over the last three years (30%), 
+    average rating normalized to a ten-point scale (25%), median ownership as a proxy for audience size (20%), low recent 
+    saturation in the category (15%), and the success rate of games scoring seven or higher (10%). The strongest segments often 
+    fall in the moderate complexity range with meaningful decision space, 60 to 90 minutes of play, and a minimum age of ten or above. 
+    Cooperative designs with solo support can double engagement because players can learn alone and then bring others into the experience. 
+    A segment that is small but consistently strong is not a red flag; it is a green light for a focused design that respects both time and attention..
     """)
 
     # Market evolution timeline
@@ -1186,10 +1226,14 @@ with tab_wizard:
                                               default=preset_data["mechs_on"][:3])
         
         with mech_theme_cols[1]:
-            available_themes = [c for c in X_all.columns if c.startswith("Cat:") or c in preset_data["cats"]][:30]
-            selected_themes = st.multiselect("Themes & Categories",
-                                           available_themes,
-                                           default=preset_data["cats"][:2])
+            available_themes = discover_available_themes(X_all.columns, preset_cats=preset_data["cats"], limit=60)
+            default_themes = [c for c in preset_data["cats"] if c in available_themes][:3]
+            selected_themes = st.multiselect(
+                "Themes & Categories (model-aware)",
+                options=available_themes,
+                default=default_themes,
+                help="Only shows themes present in the model’s feature set so predictions stay aligned."
+            )
         
         st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
         
@@ -2356,6 +2400,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
