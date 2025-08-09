@@ -591,65 +591,109 @@ def create_market_evolution_timeline(df: pd.DataFrame) -> go.Figure:
     
     return fig
 
-def create_mechanic_network_graph(synergies_df: pd.DataFrame, top_n: int = 20) -> go.Figure:
-    """Create network graph showing mechanic relationships."""
-    if len(synergies_df) == 0:
+def create_mechanic_network_graph(synergies_df: pd.DataFrame, top_n: int = 30) -> go.Figure:
+    """Network graph where edge width & color reflect success rate.
+       Visual scaling only; underlying numbers unchanged.
+    """
+    if synergies_df is None or len(synergies_df) == 0:
         return go.Figure().add_annotation(text="Insufficient data for network graph", showarrow=False)
-    
-    top_synergies = synergies_df.head(top_n)
-    
-    # Build network
-    nodes = list(set(top_synergies["Mechanic 1"].tolist() + top_synergies["Mechanic 2"].tolist()))
-    node_dict = {node: i for i, node in enumerate(nodes)}
-    
-    edges = []
-    edge_weights = []
-    for _, row in top_synergies.iterrows():
-        edges.append((node_dict[row["Mechanic 1"]], node_dict[row["Mechanic 2"]]))
-        edge_weights.append(row["Success Rate"])
-    
+
+    # Take the strongest combos first
+    df = synergies_df.copy().sort_values(["Success Rate", "Games"], ascending=False).head(top_n).reset_index(drop=True)
+
+    # Nodes
+    nodes = sorted(set(df["Mechanic 1"]).union(set(df["Mechanic 2"])))
+    node_idx = {n: i for i, n in enumerate(nodes)}
+
     # Simple circular layout
     n = len(nodes)
-    angles = [2 * np.pi * i / n for i in range(n)]
-    x = [np.cos(angle) for angle in angles]
-    y = [np.sin(angle) for angle in angles]
-    
-    # Create figure
+    theta = np.linspace(0, 2*np.pi, n, endpoint=False) if n else np.array([])
+    x = np.cos(theta); y = np.sin(theta)
+
+    # ---- Edge visual scaling ----
+    s = df["Success Rate"].astype(float).clip(0, 1)               # 0–1
+    # If the range is narrow, stretch by rank (visual only)
+    if (s.max() - s.min()) < 0.05 and len(s) > 1:
+        m = s.rank(method="dense", pct=True)                       # 0–1
+    else:
+        denom = max(1e-9, (s.max() - s.min()))
+        m = (s - s.min()) / denom                                  # 0–1
+
+    width_min, width_max = 1.5, 10.0
+    widths   = width_min + m * (width_max - width_min)
+    opac_min, opac_max = 0.25, 0.85
+    opacities = opac_min + m * (opac_max - opac_min)
+
+    # Colors from a continuous scale (stronger = darker)
+    edge_colors = [px.colors.sample_colorscale("YlGnBu", float(val))[0] for val in m]
+
     fig = go.Figure()
-    
-    # Add edges
-    for edge, weight in zip(edges, edge_weights):
+
+    # Edges
+    for i, row in df.iterrows():
+        a, b = node_idx[row["Mechanic 1"]], node_idx[row["Mechanic 2"]]
         fig.add_trace(go.Scatter(
-            x=[x[edge[0]], x[edge[1]]],
-            y=[y[edge[0]], y[edge[1]]],
-            mode='lines',
-            line=dict(width=weight*5, color=CHART_COLORS[0]),
-            opacity=0.5,
-            hoverinfo='skip',
+            x=[x[a], x[b]], y=[y[a], y[b]],
+            mode="lines",
+            line=dict(width=float(widths[i]), color=edge_colors[i]),
+            opacity=float(opacities[i]),
+            hovertemplate=(
+                f"{row['Mechanic 1']} + {row['Mechanic 2']}"
+                f"<br>Success rate: {row['Success Rate']*100:.1f}%"
+                f"<br>Games: {int(row['Games'])}<extra></extra>"
+            ),
             showlegend=False
         ))
-    
-    # Add nodes
+
+    # Node sizes by total connection strength
+    strength = np.zeros(n)
+    for _, row in df.iterrows():
+        strength[node_idx[row["Mechanic 1"]]] += float(row["Success Rate"])
+        strength[node_idx[row["Mechanic 2"]]] += float(row["Success Rate"])
+
+    size_min, size_max = 14.0, 30.0
+    if strength.max() > 0:
+        node_sizes = size_min + (strength - strength.min()) / (strength.max() - strength.min() + 1e-9) * (size_max - size_min)
+    else:
+        node_sizes = np.full(n, 18.0)
+
+    # Nodes
     fig.add_trace(go.Scatter(
         x=x, y=y,
-        mode='markers+text',
-        marker=dict(size=20, color=CHART_COLORS[1]),
-        text=nodes,
+        mode="markers+text",
+        marker=dict(size=node_sizes, color=CHART_COLORS[1]),
+        text=[n.replace("Mechanic_", "") for n in nodes],
         textposition="top center",
-        hovertemplate='%{text}<extra></extra>',
+        hovertemplate="%{text}<extra></extra>",
         showlegend=False
     ))
-    
+
+    # Dummy trace to show a colorbar for success rate
+    if len(s) > 0:
+        cmin, cmax = float(s.min()), float(s.max())
+        fig.add_trace(go.Scatter(
+            x=[None, None], y=[None, None],
+            mode="markers",
+            marker=dict(
+                colorscale="YlGnBu",
+                cmin=cmin, cmax=cmax,
+                color=[cmin, cmax],
+                size=0,
+                colorbar=dict(title="Success rate", tickformat=".0%")
+            ),
+            hoverinfo="skip",
+            showlegend=False
+        ))
+
     fig.update_layout(
-        title="Mechanic Synergy Network (line thickness = success rate)",
-        height=500,
+        title="Mechanic Synergy Network (edge width & color ~ success rate)",
+        height=520,
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         font_color=MUTED,
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         yaxis=dict(showgrid=False, showticklabels=False, zeroline=False)
     )
-    
     return fig
 
 def create_success_predictor_chart(df: pd.DataFrame, x_col: str, y_col: str = "AvgRating") -> go.Figure:
@@ -1142,7 +1186,8 @@ with tab_intel:
     evolution_fig = create_market_evolution_timeline(view_f)
     st.plotly_chart(evolution_fig, use_container_width=True)
     narr("""
-    **What changed over time.** The boom after Catan raised the bar. Ratings rose and designers learned to do more with less. Complexity ticked up, yet playtime did not. That is craft improving. Strategic richness without bloat. The market now rewards clarity, replay, and respect for the clock.
+    **What changed over time.** The boom after Catan raised the bar. Ratings rose and designers learned to do more with less. 
+    Complexity ticked up, yet playtime did not. That is craft improving. Strategic richness without bloat. The market now rewards clarity, replay, and respect for the clock.
     """)
 
     # Key insights
@@ -2373,7 +2418,9 @@ with tab_synergies:
         network_fig = create_mechanic_network_graph(synergies, top_n=30)
         st.plotly_chart(network_fig, use_container_width=True)
         narr("""
-        **Mechanics that sing.** Some pairs create clarity. Worker placement with a market. Co-op with variable powers. Drafting with tempo pressure. Do not pile on features. Pick a duet, not a chorus. Leave room for players to discover lines you did not script.
+        **Mechanics that work.** Certain combinations produce clean decision space—worker placement with a market, 
+        co-op with variable powers, drafting with tempo pressure. Resist feature creep. Anchor on one or two core systems 
+        and let the rest emerge through play.
         """)
         
         # Underexplored combinations
@@ -2469,6 +2516,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
