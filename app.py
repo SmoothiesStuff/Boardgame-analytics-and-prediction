@@ -244,6 +244,65 @@ def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
         pca = None
     
     return scaler, kmeans, pca, labels, coords
+########## cluster naming utils ##########
+def _nice_list(words, max_n=2):                                                # make "A + B" strings
+    words = [w for w in words if w]
+    return " + ".join(words[:max_n]) if words else ""
+
+def _top_diff_features(cluster_df, all_df, startswith, min_prop=0.25, max_show=2):
+    cols = [c for c in cluster_df.columns if c.startswith(startswith)]
+    if not cols:
+        return []
+    # usage gaps vs overall
+    diffs = []
+    overall = all_df[cols].mean().fillna(0.0)
+    local   = cluster_df[cols].mean().fillna(0.0)
+    for c in cols:
+        if local[c] >= min_prop:
+            diffs.append((c, float(local[c] - overall[c])))
+    diffs.sort(key=lambda x: x[1], reverse=True)
+    names = [c.replace("Mechanic_", "").replace("Cat:", "").replace("_", " ") for c,_ in diffs]
+    # small cleanups
+    names = [n.replace("Cgs", "Deck/CCG").replace("Cgs ", "Deck/CCG ") for n in names]
+    return names[:max_show]
+
+def generate_cluster_labels(view_df: pd.DataFrame) -> dict[int, str]:
+    labels = {}
+    # global percentiles for context
+    w_lo, w_hi = np.nanpercentile(view_df["GameWeight"], [33, 67])
+    r_lo, r_hi = 6.3, 7.3
+    t_lo, t_hi = np.nanpercentile(view_df["Play Time"], [33, 67])
+
+    for cid, cdf in view_df.groupby("Cluster"):
+        if cdf.empty:
+            labels[cid] = f"Segment {cid}"
+            continue
+        # adjectives by position vs percentiles
+        w = float(cdf["GameWeight"].median())
+        r = float(cdf["AvgRating"].mean())
+        t = float(cdf["Play Time"].median())
+        comp = "Low-complexity" if w < w_lo else ("High-complexity" if w > w_hi else "Mid-weight")
+        qual = "weakly rated" if r < r_lo else ("strongly rated" if r >= r_hi else "solid-rating")
+        dur  = "short" if t < t_lo else ("long" if t > t_hi else "medium")
+
+        mechs  = _top_diff_features(cdf, view_df, "Mechanic_", min_prop=0.25, max_show=2)
+        themes = _top_diff_features(cdf, view_df, "Cat:",       min_prop=0.25, max_show=1)
+
+        mech_str  = _nice_list(mechs)
+        theme_str = _nice_list(themes, max_n=1)
+
+        bits = [comp, qual]
+        if theme_str: bits.append(theme_str.lower())
+        if mech_str:  bits.append(f"with {mech_str}")
+        bits.append(f"({dur} play)")
+
+        name = " ".join(bits).strip()
+        # fallback if too bare
+        if len(name) < 12:
+            top_example = cdf.nlargest(1, "AvgRating")["Name"].iloc[0]
+            name = f"Segment {cid}: similar to {top_example}"
+        labels[cid] = name[0].upper() + name[1:]
+    return labels
 
 # Enhanced analytics functions
 def calculate_market_opportunity_score(cluster_df: pd.DataFrame, year: int = CURRENT_YEAR) -> float:
@@ -744,7 +803,8 @@ if selected_themes:
         mask &= theme_combined.any(axis=1) if theme_match_mode == "Any" else theme_combined.all(axis=1)
 
 view_f = view[mask].copy()
-
+########## build labels for visible (filtered) data ##########
+cluster_labels = generate_cluster_labels(view_f)
 if view_f.empty:
     st.error("❌ No games match current filters. Please adjust parameters.")
     st.stop()
@@ -829,7 +889,7 @@ with tab_intel:
     for i, (cluster_id, data) in enumerate(opportunities):
         with opp_cols[i]:
             st.markdown('<div class="earthcard">', unsafe_allow_html=True)
-            st.markdown(f"**Segment {cluster_id}**")
+            st.markdown(f"**{cluster_labels.get(cluster_id, f'Segment {cluster_id}')}**")
             score = data["opportunity_score"]
             color = SUCCESS_COLOR if score > 70 else WARNING_COLOR if score > 40 else DANGER_COLOR
             st.markdown(f"<h2 style='color: {color}'>{score:.0f}%</h2>", unsafe_allow_html=True)
@@ -991,7 +1051,7 @@ with tab_wizard:
                                            available_themes,
                                            default=preset_data["cats"][:2])
         
-        st.markdown("#### Additional Considerations")
+        st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
         
         additional_cols = st.columns(3)
         
@@ -1105,6 +1165,120 @@ with tab_wizard:
                 payback = "6 months" if roi_estimate > 2 else "12 months" if roi_estimate > 1 else "18+ months"
                 st.caption(f"💰 Payback: {payback}")
                 st.markdown('</div>', unsafe_allow_html=True)
+
+            ########## design analysis visuals ##########
+            st.markdown("### 🎨 Visuals")
+            
+            # A) Rating vs Complexity (your design highlighted)
+            fig_a = go.Figure()
+            
+            rest = view_f
+            seg  = cluster_games
+            
+            # base cloud (muted)
+            fig_a.add_trace(go.Scatter(
+                x=rest["GameWeight"], y=rest["AvgRating"],
+                mode="markers", name="All filtered games",
+                marker=dict(size=5, opacity=0.25),
+                hoverinfo="skip"
+            ))
+            
+            # segment highlight
+            fig_a.add_trace(go.Scatter(
+                x=seg["GameWeight"], y=seg["AvgRating"],
+                mode="markers", name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                marker=dict(size=7, opacity=0.7),
+                text=seg.get("Name", None),
+                hovertemplate="<b>%{text}</b><br>Weight: %{x:.2f}<br>Rating: %{y:.2f}<extra></extra>"
+            ))
+            
+            # your game
+            fig_a.add_trace(go.Scatter(
+                x=[complexity], y=[predicted_rating],
+                mode="markers+text", name="Your game",
+                marker=dict(symbol="star", size=18, line=dict(width=1), color="red"),
+                text=["★"], textposition="top center",
+                hovertemplate=f"<b>Your design</b><br>Weight: {complexity:.2f}<br>Pred rating: {predicted_rating:.2f}<extra></extra>"
+            ))
+            
+            fig_a.update_layout(
+                title="Rating vs Complexity (Your design highlighted)",
+                xaxis_title="Complexity (weight 1–5)",
+                yaxis_title="Average Rating",
+                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
+            )
+            st.plotly_chart(fig_a, use_container_width=True)
+            
+            # B) Rating vs Owners (your expected owners)
+            fig_b = go.Figure()
+            
+            fig_b.add_trace(go.Scatter(
+                x=rest["AvgRating"], y=rest["Owned Users"],
+                mode="markers", name="All filtered games",
+                marker=dict(size=5, opacity=0.25),
+                hoverinfo="skip"
+            ))
+            
+            fig_b.add_trace(go.Scatter(
+                x=seg["AvgRating"], y=seg["Owned Users"],
+                mode="markers", name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                marker=dict(size=7, opacity=0.7),
+                text=seg.get("Name", None),
+                hovertemplate="<b>%{text}</b><br>Rating: %{x:.2f}<br>Owners: %{y:,}<extra></extra>"
+            ))
+            
+            fig_b.add_trace(go.Scatter(
+                x=[predicted_rating], y=[predicted_owners],
+                mode="markers+text", name="Your game (expected owners)",
+                marker=dict(symbol="star", size=18, line=dict(width=1), color="red"),
+                text=[f"★ {predicted_owners:,}"], textposition="bottom center",
+                hovertemplate=f"<b>Your design</b><br>Pred rating: {predicted_rating:.2f}"
+                              f"<br>Expected owners: {predicted_owners:,}<extra></extra>"
+            ))
+            
+            fig_b.update_layout(
+                title="Rating vs Owners (Your expected owners highlighted)",
+                xaxis_title="Average Rating",
+                yaxis_title="Owners (log)",
+                yaxis_type="log",
+                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
+            )
+            st.plotly_chart(fig_b, use_container_width=True)
+            
+            # C) Year vs Rating with segment highlight and your symbol
+            fig_c = go.Figure()
+            
+            fig_c.add_trace(go.Scatter(
+                x=rest["Year Published"], y=rest["AvgRating"],
+                mode="markers", name="All filtered games",
+                marker=dict(size=5, opacity=0.15),
+                hoverinfo="skip"
+            ))
+            
+            fig_c.add_trace(go.Scatter(
+                x=seg["Year Published"], y=seg["AvgRating"],
+                mode="markers", name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                marker=dict(size=7, opacity=0.75),
+                text=seg.get("Name", None),
+                hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>"
+            ))
+            
+            fig_c.add_trace(go.Scatter(
+                x=[year_published], y=[predicted_rating],
+                mode="markers+text", name="Your game",
+                marker=dict(symbol="star", size=20, line=dict(width=1), color="red"),
+                text=["★"], textposition="middle right",
+                hovertemplate=f"<b>Your design</b><br>Year: {year_published}<br>Pred rating: {predicted_rating:.2f}<extra></extra>"
+            ))
+            
+            fig_c.update_layout(
+                title="Year vs Rating (Segment highlighted; your game marked)",
+                xaxis_title="Year Published",
+                yaxis_title="Average Rating",
+                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
+            )
+            st.plotly_chart(fig_c, use_container_width=True)
+
             
             # Market positioning
             st.markdown("### 📍 Market Positioning Analysis")
@@ -1576,8 +1750,9 @@ with tab_segments:
     selected_cluster = st.selectbox(
         "Select Market Segment to Explore",
         cluster_options,
-        format_func=lambda x: f"Segment {x} ({cluster_insights[x]['size']} games, {cluster_insights[x]['avg_rating']:.2f} avg rating)"
-    )
+        format_func=lambda x: f"{cluster_labels.get(x, f'Segment {x}')} "
+                      f"({cluster_insights[x]['size']} games, {cluster_insights[x]['avg_rating']:.2f} avg)"
+
     
     cluster_data = view_f[view_f["Cluster"] == selected_cluster]
     
@@ -1853,6 +2028,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
