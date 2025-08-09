@@ -1521,20 +1521,39 @@ with tab_wizard:
             
             with pred_cols[3]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                roi_estimate = (predicted_owners * target_price * 0.4) / 50000  # Simplified ROI
-                st.metric("ROI Estimate", f"{roi_estimate:.1f}x")
-                payback = "6 months" if roi_estimate > 2 else "12 months" if roi_estimate > 1 else "18+ months"
+            
+                # Use pricing inputs from the form for a quick, honest ROI signal
+                msrp = float(target_price)  # alias for clarity
+                net_per_unit_card = msrp * (1 - channel_fee_pct)
+                gp_per_unit_card = net_per_unit_card - (unit_cogs + shipping_per_unit)
+            
+                # Simple ROI multiple using current predicted owners & fixed costs
+                fixed_costs_card = float(marketing_fixed + misc_fixed)
+                roi_estimate = (
+                    (gp_per_unit_card * max(float(predicted_owners) * (1 - returns_pct), 0) - fixed_costs_card)
+                    / fixed_costs_card
+                    if fixed_costs_card > 0 else float("inf")
+                )
+            
+                st.metric("ROI Estimate", "∞" if not math.isfinite(roi_estimate) else f"{roi_estimate:.1f}x")
+                payback = "6 months" if (math.isfinite(roi_estimate) and roi_estimate > 2) else (
+                          "12 months" if (math.isfinite(roi_estimate) and roi_estimate > 1) else "18+ months")
                 st.caption(f"💰 Payback: {payback}")
                 st.markdown('</div>', unsafe_allow_html=True)
-
-            narr(f"""
-            **Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. If the model likes your rating but owners look soft, the design might be niche or overpriced. If owners look strong but rating is middling, you might have a fun toy that needs sharper decisions. Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes.
-            """)
-
-                        ########## Pricing & Unit Economics ##########
+            
+            # Narrative (outside the pred_cols blocks)
+            narr(
+                "**Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. "
+                "If the model likes your rating but owners look soft, the design might be niche or overpriced. "
+                "If owners look strong but rating is middling, you might have a fun toy that needs sharper decisions. "
+                "Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes."
+            )
+            
+            ########## Pricing & Unit Economics ##########
             st.markdown("### 💵 Pricing & Unit Economics")
+            
             # Use inputs captured in the form
-            msrp = float(target_price)  # same slider, just a local alias
+            msrp = float(target_price)
             anchor_price = estimate_anchor_price(
                 complexity, component_quality, production_quality, max_players, play_time
             )
@@ -1562,31 +1581,7 @@ with tab_wizard:
             payback_months = math.ceil(breakeven_units / max(monthly_units, 1)) if math.isfinite(breakeven_units) else None
             gross_margin_pct = (gross_profit_per_unit / net_per_unit) if net_per_unit > 0 else 0.0
             
-            
-            # Adjust owners by price (bounded)
-            owners_base = float(predicted_owners)
-            if apply_sensitivity:
-                owners_adj = owners_base * (msrp / max(anchor_price, 1.0)) ** elasticity
-                owners_adj = float(np.clip(owners_adj, owners_base * 0.6, owners_base * 1.4))
-            else:
-                owners_adj = owners_base
-            
-            # Unit economics
-            net_per_unit = msrp * (1 - channel_fee_pct)
-            gross_profit_per_unit = net_per_unit - (unit_cogs + shipping_per_unit)
-            effective_units = owners_adj * (1 - returns_pct)
-            fixed_costs = float(marketing_fixed + misc_fixed)
-            
-            total_gross_profit = gross_profit_per_unit * max(effective_units, 0)
-            net_profit = total_gross_profit - fixed_costs
-            roi_multiple = (net_profit / fixed_costs) if fixed_costs > 0 else float("inf")
-            
-            breakeven_units = (fixed_costs / gross_profit_per_unit) if gross_profit_per_unit > 0 else float("inf")
-            monthly_units = effective_units / max(sales_window, 1)
-            payback_months = math.ceil(breakeven_units / max(monthly_units, 1)) if math.isfinite(breakeven_units) else None
-            gross_margin_pct = (gross_profit_per_unit / net_per_unit) if net_per_unit > 0 else 0.0
-            
-            # Metrics row
+            # Metrics row continues...
             m1, m2, m3, m4, m5, m6 = st.columns(6)
             with m1:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
@@ -2538,6 +2533,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
