@@ -9,7 +9,6 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
 from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -1854,4 +1853,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
