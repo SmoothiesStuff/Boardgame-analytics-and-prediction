@@ -967,23 +967,61 @@ with tab_intel:
     fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100])
     
     # Add a right axis that overlays the left, showing 0–10
+    # fig_opp_bar.update_layout(
+    #     yaxis2=dict(
+    #         title="Avg Rating (0–10)",
+    #         overlaying="y",
+    #         side="right",
+    #         range=[0, 10],
+    #         tickmode="linear",
+    #         dtick=1
+    #     ),
+    #     barmode="group",          # <-- grouped (separate) bars
+    #     bargap=0.25,
+    #     bargroupgap=0.05,
+    #     plot_bgcolor=CHART_BG,
+    #     paper_bgcolor=CHART_BG,
+    #     font_color=MUTED,
+    #     legend_title_text="",
+    #     margin=dict(t=30, b=60, l=10, r=40)
+    # )
+    # make sure right axis renders even without a y2 trace
+    fig_opp_bar.add_trace(go.Scatter(
+        x=[None], y=[None],
+        yaxis="y2", showlegend=False, hoverinfo="skip"
+    ))
+    
     fig_opp_bar.update_layout(
+        # right axis visible and readable
         yaxis2=dict(
             title="Avg Rating (0–10)",
             overlaying="y",
             side="right",
             range=[0, 10],
             tickmode="linear",
-            dtick=1
+            dtick=1,
+            showgrid=False,
+            title_standoff=8
         ),
-        barmode="group",          # <-- grouped (separate) bars
+        barmode="group",        # separate bars
         bargap=0.25,
         bargroupgap=0.05,
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         font_color=MUTED,
         legend_title_text="",
-        margin=dict(t=30, b=60, l=10, r=40)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        margin=dict(t=50, b=110, l=60, r=95)  # extra bottom/right space for labels + y2 ticks
+    )
+    
+    # make wrapped labels fit without diagonal ticks
+    fig_opp_bar.update_xaxes(
+        title_text="",
+        tickmode="array",
+        tickvals=xs,
+        ticktext=labels_wrapped,
+        tickangle=0,
+        automargin=True
     )
     
     fig_opp_bar.update_xaxes(title_text="", tickangle=0)
@@ -2334,6 +2372,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
