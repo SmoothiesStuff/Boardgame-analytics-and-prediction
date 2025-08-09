@@ -1256,135 +1256,90 @@ with tab_wizard:
     st.markdown(f"### 📝 Designing: {current_preset}")
     
     with st.form("design_form"):
-        st.markdown("#### Core Specifications")
-        
-        spec_cols = st.columns(4)
-        with spec_cols[0]:
-            year_published = st.number_input("Release Year", 
-                                            value=preset_data["year"], 
-                                            min_value=CURRENT_YEAR,
-                                            max_value=CURRENT_YEAR+2)
-            min_players = st.number_input("Min Players", 
-                                         value=preset_data["min_players"],
-                                         min_value=1, max_value=10)
-        
-        with spec_cols[1]:
-            play_time = st.number_input("Play Time (min)", 
-                                       value=preset_data["play_time"],
-                                       min_value=5, max_value=360, step=5)
-            max_players = st.number_input("Max Players", 
-                                         value=preset_data["max_players"],
-                                         min_value=min_players, max_value=20)
-        
-        with spec_cols[2]:
-            complexity = st.slider("Complexity", 1.0, 5.0, 
-                                  preset_data["weight"], 0.1,
-                                  help="1=Very Simple, 5=Very Complex")
-            min_age = st.number_input("Min Age", 
-                                     value=preset_data["min_age"],
-                                     min_value=3, max_value=21)
-        
-        with spec_cols[3]:
-            kickstarted = st.selectbox("Funding Model", 
-                                      ["Traditional", "Kickstarter", "Gamefound"],
-                                      index=0)
-            production_quality = st.select_slider("Production Quality",
-                                                 ["Basic", "Standard", "Premium", "Deluxe"],
-                                                 value="Standard")
-        
-        
-        # --- Mechanics & Themes (stacked in an expander) ---
-        with st.expander("Mechanics & Themes (toggle selections)", expanded=True):
-            # Mechanics first (Solo + Co-op live here)
-            st.markdown("##### Mechanics")
-            solo_mode = st.checkbox(
-                "Solo Mode",
-                value=(preset_data.get("min_players", 1) == 1),
-                key="solo_mode_toggle"
-            )
-            coop_toggle = st.checkbox(
-                "Co-op (team vs game)",
-                value=("Cooperative Game" in preset_data.get("mechs_on", [])),
-                key="coop_toggle"
-            )
-        
-            mech_all = discover_mechanics(X_all.columns)
-            # Remove Co-op from the grid since it's its own toggle
-            mech_all = [m for m in mech_all if m not in {"Cooperative Game", "Mechanic_Cooperative_Game"}]
-        
-            mech_defaults = [
-                m if m in mech_all else f"Mechanic_{m.replace(' ', '_')}"
-                for m in preset_data.get("mechs_on", [])
-                if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)
-            ]
-            selected_mechanics = render_toggle_grid(
-                mech_all, defaults=mech_defaults, columns=3, key_prefix="mech"
-            )
-        
-            st.markdown("---")
-        
-            # Themes under Mechanics
-            st.markdown("##### Themes & Categories")
-            theme_all = discover_themes(X_all.columns)
-            theme_defaults = [c for c in preset_data.get("cats", []) if c in theme_all]
-            selected_themes = render_toggle_grid(
-                theme_all, defaults=theme_defaults, columns=3, key_prefix="theme"
-            )
-        # --- end expander ---
+    st.markdown("#### Core Specifications")
+    spec_cols = st.columns(4)
+    with spec_cols[0]:
+        year_published = st.number_input("Release Year", value=preset_data["year"],
+                                         min_value=CURRENT_YEAR, max_value=CURRENT_YEAR+2, key="year_input")
+        min_players = st.number_input("Min Players", value=preset_data["min_players"],
+                                      min_value=1, max_value=10, key="min_players_input")
+    with spec_cols[1]:
+        play_time = st.number_input("Play Time (min)", value=preset_data["play_time"],
+                                    min_value=5, max_value=360, step=5, key="playtime_input")
+        max_players = st.number_input("Max Players", value=preset_data["max_players"],
+                                      min_value=min_players, max_value=20, key="max_players_input")
+    with spec_cols[2]:
+        complexity = st.slider("Complexity", 1.0, 5.0, preset_data["weight"], 0.1, key="complexity_input")
+        min_age = st.number_input("Min Age", value=preset_data["min_age"], min_value=3, max_value=21, key="min_age_input")
+    with spec_cols[3]:
+        kickstarted = st.selectbox("Funding Model", ["Traditional", "Kickstarter", "Gamefound"], index=0, key="funding_input")
+        production_quality = st.select_slider("Production Quality", ["Basic", "Standard", "Premium"],
+                                              value="Standard", key="prod_quality_input")
 
-        
-        st.markdown("#### Additional Considerations (predictions come from estimates of 2022 production costs)")
-        
-        additional_cols = st.columns(3)
-        
-        with additional_cols[2]:
-            target_price = st.slider("Target MSRP ($)", 20, 150, 50, 5)
+    # --- Mechanics & Themes (stacked) ---
+    with st.expander("Mechanics & Themes (toggle selections)", expanded=True):
+        # Mechanics (Solo + Co-op)
+        st.markdown("##### Mechanics")
+        solo_mode = st.checkbox("Solo Mode", value=(preset_data.get("min_players", 1) == 1), key="solo_mode_toggle")
+        coop_toggle = st.checkbox("Co-op (team vs game)",
+                                  value=("Cooperative Game" in preset_data.get("mechs_on", [])),
+                                  key="coop_toggle")
+
+        mech_all = discover_mechanics(X_all.columns)
+        # remove Co-op from grid; it's its own toggle
+        mech_all = [m for m in mech_all if m not in {"Cooperative Game", "Mechanic_Cooperative_Game"}]
+        mech_defaults = [
+            m if m in mech_all else f"Mechanic_{m.replace(' ', '_')}"
+            for m in preset_data.get("mechs_on", [])
+            if (m in mech_all or f"Mechanic_{m.replace(' ', '_')}" in mech_all)
+        ]
+        selected_mechanics = render_toggle_grid(mech_all, defaults=mech_defaults, columns=3, key_prefix="mech")
+
+        st.markdown("---")
+
+        # Themes (under mechanics)
+        st.markdown("##### Themes & Categories")
+        theme_all = discover_themes(X_all.columns)
+        theme_defaults = [c for c in preset_data.get("cats", []) if c in theme_all]
+        selected_themes = render_toggle_grid(theme_all, defaults=theme_defaults, columns=3, key_prefix="theme")
+
+    # --- Pricing & Unit Economics (moved inside form) ---
+    st.markdown("#### Pricing & Unit Economics")
+    with st.expander("Set price & cost assumptions", expanded=True):
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        with r1c1:
+            target_price = st.slider("Target MSRP ($)", 20, 150, 50, 1, key="msrp_input")
+        with r1c2:
             component_quality = st.select_slider("Component Quality",
-                                                ["Basic", "Good", "Premium"],
-                                                value="Good")
+                                                 ["Basic", "Good", "Premium"],
+                                                 value="Good", key="component_quality_input")
+        with r1c3:
+            sales_window = st.slider("Sales Window (months)", 3, 36, 12, key="sales_window_input")
+        with r1c4:
+            returns_pct = st.slider("Returns/Damage Allowance (%)", 0, 20, 5, key="returns_input") / 100.0
 
-        narr("""
-    **Design first principles.** Start from three anchors. Target complexity that invites thinking without confusion. 
-    Land the core loop in 60 to 90 minutes. Aim the minimum age at 10 so families and hobby tables overlap. 
-    rom there, pick one mechanic that does the heavy lifting and one that creates emergent texture. Resist adding a third that just adds rules.
-    """)
+        r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+        with r2c1:
+            unit_cogs = st.slider("Unit Cost to Produce ($)", 1, 60, 12, key="cogs_input")
+        with r2c2:
+            shipping_per_unit = st.slider("Fulfillment & Shipping per Unit ($)", 0, 30, 5, key="ship_input")
+        with r2c3:
+            marketing_fixed = st.number_input("Marketing Budget ($, fixed)", 0, 500_000, 25_000, step=1_000, key="mkt_input")
+        with r2c4:
+            misc_fixed = st.number_input("Misc & Dev ($, fixed)", 0, 500_000, 15_000, step=1_000, key="misc_input")
 
-            # --- Pricing & Unit Economics (inputs before analysis) ---
-        st.markdown("#### Pricing & Unit Economics")
-        with st.expander("Set price & cost assumptions", expanded=True):
-            r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-            with r1c1:
-                target_price = st.slider("Target MSRP ($)", 20, 150, 50, 1, key="msrp_input")
-            with r1c2:
-                component_quality = st.select_slider("Component Quality", ["Basic", "Good", "Premium"], value="Good")
-            with r1c3:
-                sales_window = st.slider("Sales Window (months)", 3, 36, 12)
-            with r1c4:
-                returns_pct = st.slider("Returns/Damage Allowance (%)", 0, 20, 5) / 100.0
-        
-            r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-            with r2c1:
-                unit_cogs = st.slider("Unit Cost to Produce ($)", 1, 60, 12)
-            with r2c2:
-                shipping_per_unit = st.slider("Fulfillment & Shipping per Unit ($)", 0, 30, 5)
-            with r2c3:
-                marketing_fixed = st.number_input("Marketing Budget ($, fixed)", 0, 500_000, 25_000, step=1_000)
-            with r2c4:
-                misc_fixed = st.number_input("Misc & Dev ($, fixed)", 0, 500_000, 15_000, step=1_000)
-        
-            with st.expander("Advanced assumptions", expanded=False):
-                fee_default = default_channel_fee_pct(kickstarted)
-                channel_fee_pct = st.slider("Retailer / Platform Fee (%)", 0, 70, int(fee_default*100)) / 100.0
-                apply_sensitivity = st.checkbox("Apply price elasticity to owners", value=True)
-                elasticity = st.slider(
-                    "Price Elasticity (negative)",
-                    -2.0, -0.1,
-                    -1.1 if kickstarted == "Traditional" else -0.8, 0.1,
-                    help="Percent change in owners for 1 percent price change vs anchor"
-                )
-    # --- end pricing inputs ---
-        analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", 
-                                              type="primary", use_container_width=True)
+        with st.expander("Advanced assumptions", expanded=False):
+            fee_default = default_channel_fee_pct(kickstarted)
+            channel_fee_pct = st.slider("Retailer / Platform Fee (%)", 0, 70, int(fee_default*100),
+                                        key="fee_input") / 100.0
+            apply_sensitivity = st.checkbox("Apply price elasticity to owners", value=True, key="elasticity_toggle")
+            elasticity = st.slider("Price Elasticity (negative)", -2.0, -0.1,
+                                   -1.1 if kickstarted == "Traditional" else -0.8, 0.1,
+                                   key="elasticity_input")
+
+    # >>> Submit button must be inside the form <<<
+    analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", type="primary", use_container_width=True)
+
         
     if analyze_button:
         # Build comprehensive profile
@@ -2533,6 +2488,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
