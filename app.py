@@ -665,6 +665,39 @@ def build_mech_network_fig_static(synergies_df: pd.DataFrame, top_n: int = 30) -
         margin=dict(t=60, r=20, l=20, b=20),
         hovermode="closest"
     )
+    # ---------- Legend (put this after the node trace, before return) ----------
+    # 1) Edge thickness legend (use a mid-tone color; widths map to "strength")
+    legend_color = px.colors.sample_colorscale("YlGnBu", 0.6)[0]
+    for label, w in [("SR ≈ 20%", 3), ("SR ≈ 50%", 6), ("SR ≈ 80%", 10)]:
+        fig.add_trace(go.Scatter(
+            x=[None, None], y=[None, None],
+            mode="lines",
+            line=dict(width=w, color=legend_color),
+            name=label,
+            hoverinfo="skip",
+            showlegend=True
+        ))
+
+    # 2) Colorbar for Success Rate (0–1); invisible marker just to show the scale
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode="markers",
+        marker=dict(
+            size=0.0001,                    # effectively invisible
+            color=[0, 1],                   # min/max for the scale
+            cmin=0, cmax=1,
+            colorscale="YlGnBu",
+            showscale=True,
+            colorbar=dict(title="Success rate", ticksuffix="")
+        ),
+        hoverinfo="skip",
+        showlegend=False
+    ))
+    
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0)
+    )
     return fig
 
 
@@ -2610,6 +2643,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
