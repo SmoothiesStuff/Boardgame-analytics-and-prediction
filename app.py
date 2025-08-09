@@ -175,42 +175,23 @@ def predict_with_models(models: Dict, X_input_df: pd.DataFrame) -> Dict[str, flo
 def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
     fig = go.Figure()
     
-    # Create aggregated data for better visualization
-    complexity_bins = np.arange(1, 5.5, 0.2)  # Bins every 0.2 complexity points
-    df_binned = df_filtered.copy()
-    df_binned['complexity_bin'] = pd.cut(df_binned['GameWeight'], bins=complexity_bins, include_lowest=True)
-    
-    # Aggregate by complexity bins
-    agg_data = df_binned.groupby('complexity_bin').agg({
-        'AvgRating': 'mean',
-        'GameWeight': 'mean',
-        'Name': 'count'
-    }).reset_index()
-    agg_data = agg_data.dropna()
-    
-    # Main aggregated points
+    # Individual game points (scatter plot)
     fig.add_trace(go.Scatter(
-        x=agg_data["GameWeight"],
-        y=agg_data["AvgRating"], 
+        x=df_filtered["GameWeight"],
+        y=df_filtered["AvgRating"], 
         mode='markers',
-        marker=dict(
-            size=agg_data["Name"] * 2 + 8,  # Size by game count
-            color=CHART_COLORS[0], 
-            opacity=0.7,
-            line=dict(width=2, color='white')
-        ),
-        text=agg_data["Name"],
-        customdata=agg_data["GameWeight"],
-        hovertemplate="<b>Complexity %{customdata:.1f}</b><br>Average Rating: %{y:.2f}<br>Games: %{text}<extra></extra>",
-        name="Aggregated Games",
+        marker=dict(size=5, color=CHART_COLORS[0], opacity=0.6),
+        text=df_filtered["Name"],
+        hovertemplate="<b>%{text}</b><br>Complexity: %{x:.1f}<br>Rating: %{y:.2f}<extra></extra>",
+        name="All Games",
         showlegend=True
     ))
     
     # Add trend line
-    if len(agg_data) > 2:
-        z = np.polyfit(agg_data["GameWeight"], agg_data["AvgRating"], 1)
+    if len(df_filtered) > 5:
+        z = np.polyfit(df_filtered["GameWeight"], df_filtered["AvgRating"], 1)
         p = np.poly1d(z)
-        trend_x = np.linspace(agg_data["GameWeight"].min(), agg_data["GameWeight"].max(), 100)
+        trend_x = np.linspace(df_filtered["GameWeight"].min(), df_filtered["GameWeight"].max(), 100)
         fig.add_trace(go.Scatter(
             x=trend_x,
             y=p(trend_x),
@@ -234,7 +215,7 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
         ))
     
     fig.update_layout(
-        title="Game Complexity vs Player Rating (Aggregated)",
+        title="Game Complexity vs Player Rating",
         xaxis_title="Complexity (1=Simple, 5=Very Complex)",
         yaxis_title="Average Player Rating",
         plot_bgcolor=CHART_BG,
@@ -247,35 +228,23 @@ def create_complexity_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neigh
 def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=None):
     fig = go.Figure()
     
-    # Aggregate by year for cleaner visualization
-    yearly_agg = df_filtered.groupby("Year Published").agg({
-        "AvgRating": "mean",
-        "Name": "count"
-    }).reset_index()
-    
-    # Main aggregated points
+    # Individual game points (scatter plot)
     fig.add_trace(go.Scatter(
-        x=yearly_agg["Year Published"],
-        y=yearly_agg["AvgRating"],
+        x=df_filtered["Year Published"],
+        y=df_filtered["AvgRating"],
         mode='markers',
-        marker=dict(
-            size=yearly_agg["Name"] + 6,  # Size by game count
-            color=CHART_COLORS[2], 
-            opacity=0.7,
-            line=dict(width=2, color='white')
-        ),
-        text=yearly_agg["Name"],
-        customdata=yearly_agg["Year Published"],
-        hovertemplate="<b>Year %{customdata}</b><br>Average Rating: %{y:.2f}<br>Games Released: %{text}<extra></extra>",
-        name="Yearly Averages",
+        marker=dict(size=5, color=CHART_COLORS[2], opacity=0.6),
+        text=df_filtered["Name"],
+        hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>",
+        name="All Games",
         showlegend=True
     ))
     
     # Add trend line
-    if len(yearly_agg) > 2:
-        z = np.polyfit(yearly_agg["Year Published"], yearly_agg["AvgRating"], 1)
+    if len(df_filtered) > 5:
+        z = np.polyfit(df_filtered["Year Published"], df_filtered["AvgRating"], 1)
         p = np.poly1d(z)
-        trend_x = np.linspace(yearly_agg["Year Published"].min(), yearly_agg["Year Published"].max(), 100)
+        trend_x = np.linspace(df_filtered["Year Published"].min(), df_filtered["Year Published"].max(), 100)
         fig.add_trace(go.Scatter(
             x=trend_x,
             y=p(trend_x),
@@ -287,25 +256,19 @@ def create_year_vs_rating_chart(df_filtered: pd.DataFrame, highlight_neighbors=N
     
     # Highlight neighbors if provided
     if highlight_neighbors is not None and len(highlight_neighbors) > 0:
-        neighbor_years = highlight_neighbors.groupby("Year Published").agg({
-            "AvgRating": "mean",
-            "Name": "count"
-        }).reset_index()
-        
         fig.add_trace(go.Scatter(
-            x=neighbor_years["Year Published"],
-            y=neighbor_years["AvgRating"],
+            x=highlight_neighbors["Year Published"],
+            y=highlight_neighbors["AvgRating"],
             mode='markers',
-            marker=dict(size=12, color=CHART_COLORS[3], opacity=0.9, line=dict(width=2, color='white')),
-            text=neighbor_years["Name"],
-            customdata=neighbor_years["Year Published"],
-            hovertemplate="<b>Year %{customdata} (Similar Games)</b><br>Average Rating: %{y:.2f}<br>Games: %{text}<extra></extra>",
-            name="Similar Game Years",
+            marker=dict(size=10, color=CHART_COLORS[3], opacity=0.9, line=dict(width=2, color='white')),
+            text=highlight_neighbors["Name"],
+            hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>",
+            name="Similar Games",
             showlegend=True
         ))
     
     fig.update_layout(
-        title="Publication Year vs Player Rating (Aggregated)",
+        title="Publication Year vs Player Rating",
         xaxis_title="Year Published",
         yaxis_title="Average Player Rating",
         plot_bgcolor=CHART_BG,
@@ -544,6 +507,14 @@ with tab_dashboard:
     st.subheader("📈 Market Analytics Dashboard")
     st.markdown("Explore key relationships in the board game market")
     
+    # Market evolution first (full width)
+    st.markdown("### 📈 Market Evolution Over Time")
+    st.markdown("*Each bubble represents one year. Bigger bubbles = higher complexity games that year.*")
+    fig3 = create_bubble_chart(view_f)
+    st.plotly_chart(fig3, use_container_width=True)
+    
+    # Then the two scatter plots side by side
+    st.markdown("### 📊 Detailed Market Analysis")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -553,11 +524,6 @@ with tab_dashboard:
     with col2:
         fig2 = create_year_vs_rating_chart(view_f)
         st.plotly_chart(fig2, use_container_width=True)
-    
-    st.markdown("### 📈 Market Evolution Over Time")
-    st.markdown("*Each bubble represents one year. Bigger bubbles = higher complexity games that year.*")
-    fig3 = create_bubble_chart(view_f)
-    st.plotly_chart(fig3, use_container_width=True)
     
     st.markdown("<div class='earthcard'>", unsafe_allow_html=True)
     st.markdown("### 🔍 Key Market Insights")
@@ -772,17 +738,24 @@ with tab_wizard:
             owners = r.get("Owned Users", np.nan)
             complexity = r.get("GameWeight", np.nan)
             
+            # Calculate percentiles for the same year
             same_year_games = view_f[view_f["Year Published"] == year] if year > 0 else pd.DataFrame()
             rating_pct = year_percentile(same_year_games.get("AvgRating", pd.Series(dtype=float)), rating) if len(same_year_games) > 0 else np.nan
             owners_pct = year_percentile(same_year_games.get("Owned Users", pd.Series(dtype=float)), owners) if len(same_year_games) > 0 else np.nan
+            
+            # Calculate percentiles vs ALL games in dataset for context
+            all_rating_pct = year_percentile(view_f["AvgRating"], rating)
+            all_owners_pct = year_percentile(view_f["Owned Users"], owners)
             
             neighbor_rows.append({
                 "Game": name,
                 "Year": year if year > 0 else "Unknown",
                 "Rating": f"{rating:.2f}" if not pd.isna(rating) else "N/A",
-                "Rating %ile": f"{rating_pct:.0f}%" if not pd.isna(rating_pct) else "N/A",
+                "Rating vs Year": f"{rating_pct:.0f}th" if not pd.isna(rating_pct) else "N/A",
+                "Rating vs All": f"{all_rating_pct:.0f}th" if not pd.isna(all_rating_pct) else "N/A",
                 "Owners": f"{int(owners):,}" if not pd.isna(owners) else "N/A", 
-                "Owners %ile": f"{owners_pct:.0f}%" if not pd.isna(owners_pct) else "N/A",
+                "Owners vs Year": f"{owners_pct:.0f}th" if not pd.isna(owners_pct) else "N/A",
+                "Owners vs All": f"{all_owners_pct:.0f}th" if not pd.isna(all_owners_pct) else "N/A",
                 "Complexity": f"{complexity:.1f}" if not pd.isna(complexity) else "N/A",
                 "Distance": f"{r['__dist']:.3f}"
             })
