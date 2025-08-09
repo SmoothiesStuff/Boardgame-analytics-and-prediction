@@ -920,7 +920,11 @@ with tab_intel:
     
     # Market opportunity analysis
     st.markdown("### 🏆 Top Market Opportunities")
-    opportunities = sorted(cluster_insights.items(), key=lambda x: x[1]["opportunity_score"], reverse=True)[:5]
+    opportunities = sorted(
+        cluster_insights.items(),
+        key=lambda x: x[1]["opportunity_score"],
+        reverse=True
+    )[:5]
     
     # ---- Dual-axis grouped bars: Opportunity (%) vs Avg Rating (0–10) ----
     def wrap_label(s: str, max_chars_per_line: int = 18, max_lines: int = 3) -> str:
@@ -930,69 +934,51 @@ with tab_intel:
                 cur = f"{cur} {w}".strip()
             else:
                 lines.append(cur); cur = w
-                if len(lines) == max_lines - 1: break
+                if len(lines) == max_lines - 1:
+                    break
         if cur: lines.append(cur)
         used_words = " ".join(lines).split()
         if len(used_words) < len(words) and len(lines) >= max_lines:
             lines[-1] = (lines[-1] + "…").rstrip()
         return "<br>".join(lines)
     
-    opp_labels_raw = [cluster_labels.get(cid, f"Segment {cid}") for cid, _ in opportunities]
-    opp_labels_wrapped = [wrap_label(lbl, 18, 3) for lbl in opp_labels_raw]
-    opp_scores = [data["opportunity_score"] for _, data in opportunities]                # 0–100
-    opp_avg_ratings = [cluster_insights[cid]["avg_rating"] for cid, _ in opportunities]  # 0–10
-    opp_avg_ratings_scaled = [v * 10 for v in opp_avg_ratings]                           # scale to 0–100
+    # Build arrays
+    cids = [cid for cid, _ in opportunities]
+    labels_raw = [cluster_labels.get(cid, f"Segment {cid}") for cid in cids]
+    labels_wrapped = [wrap_label(lbl, 18, 3) for lbl in labels_raw]
+    opp_scores = [min(max(cluster_insights[cid]["opportunity_score"], 0), 100) for cid in cids]  # 0–100
+    avg_ratings = [min(max(cluster_insights[cid]["avg_rating"], 0), 10) for cid in cids]         # 0–10
+    avg_ratings_scaled = [v * 10 for v in avg_ratings]  # scale to 0–100 so bars group
+    xs = list(range(len(cids)))  # numeric x positions
     
     fig_opp_bar = go.Figure()
     
-    # Left axis bars: Opportunity %
+    # Opportunity bars (left axis)
     fig_opp_bar.add_trace(go.Bar(
-        x=opp_labels_wrapped,
+        x=xs,
         y=opp_scores,
         name="Opportunity (%)",
         marker_color=SUCCESS_COLOR,
         opacity=0.9
     ))
     
-    # Left axis bars (scaled): Avg Rating ×10 so bars group side-by-side
+    # Avg rating bars (scaled; left axis for grouping)
     fig_opp_bar.add_trace(go.Bar(
-        x=opp_labels_wrapped,
-        y=opp_avg_ratings_scaled,
+        x=xs,
+        y=avg_ratings_scaled,
         name="Avg Rating (0–10)",
         marker_color=CHART_COLORS[1],
         opacity=0.85
     ))
     
-    # Left axis (0–100)
-    fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100])
-    
-    # Add a right axis that overlays the left, showing 0–10
-    # fig_opp_bar.update_layout(
-    #     yaxis2=dict(
-    #         title="Avg Rating (0–10)",
-    #         overlaying="y",
-    #         side="right",
-    #         range=[0, 10],
-    #         tickmode="linear",
-    #         dtick=1
-    #     ),
-    #     barmode="group",          # <-- grouped (separate) bars
-    #     bargap=0.25,
-    #     bargroupgap=0.05,
-    #     plot_bgcolor=CHART_BG,
-    #     paper_bgcolor=CHART_BG,
-    #     font_color=MUTED,
-    #     legend_title_text="",
-    #     margin=dict(t=30, b=60, l=10, r=40)
-    # )
-    # make sure right axis renders even without a y2 trace
+    # Dummy y2 trace so the right axis renders
     fig_opp_bar.add_trace(go.Scatter(
-        x=[None], y=[None],
-        yaxis="y2", showlegend=False, hoverinfo="skip"
+        x=[None], y=[None], yaxis="y2", showlegend=False, hoverinfo="skip"
     ))
     
+    # Axes + layout
+    fig_opp_bar.update_yaxes(title_text="Opportunity (%)", range=[0, 100])
     fig_opp_bar.update_layout(
-        # right axis visible and readable
         yaxis2=dict(
             title="Avg Rating (0–10)",
             overlaying="y",
@@ -1003,7 +989,7 @@ with tab_intel:
             showgrid=False,
             title_standoff=8
         ),
-        barmode="group",        # separate bars
+        barmode="group",
         bargap=0.25,
         bargroupgap=0.05,
         plot_bgcolor=CHART_BG,
@@ -1011,10 +997,10 @@ with tab_intel:
         font_color=MUTED,
         legend_title_text="",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        margin=dict(t=50, b=110, l=60, r=95)  # extra bottom/right space for labels + y2 ticks
+        margin=dict(t=50, b=110, l=60, r=95)
     )
     
-    # make wrapped labels fit without diagonal ticks
+    # Map numeric x back to wrapped labels
     fig_opp_bar.update_xaxes(
         title_text="",
         tickmode="array",
@@ -1024,10 +1010,8 @@ with tab_intel:
         automargin=True
     )
     
-    fig_opp_bar.update_xaxes(title_text="", tickangle=0)
-    
     st.plotly_chart(fig_opp_bar, use_container_width=True)
-    # -------------------------------------------------------------------
+# -------------------------------------------------------------------
     # -------------------------------------------------------------------
 
     opp_cols = st.columns(len(opportunities))
@@ -2372,6 +2356,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
