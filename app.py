@@ -74,9 +74,7 @@ EXCLUDE_FOR_CLUSTERING = [
 ]
 
 MODEL_PATHS = {
-    "rating_rf": "models/rating_rf.joblib",
     "rating_xgb": "models/rating_xgb.joblib", 
-    "sales_rf": "models/sales_rf.joblib",
     "sales_xgb": "models/sales_xgb.joblib",
 }
 INPUT_SCALER_PATH = "models/input_scaler.joblib"
@@ -240,6 +238,7 @@ def predict_with_models(models: Dict, X_input_profile: Dict) -> Dict[str, float 
         return {k: None for k in models.keys() if not k.startswith("_")}
 
     # Build 1xN input matching training columns
+    PRED_EXCLUDE = {"Cluster","PCA1","PCA2","LogOwned","SalesPercentile","__dist"}
     Xvec = build_vector_for_columns(training_cols, X_input_profile)
 
     # If we have a separate scaler (i.e., models are not Pipelines), transform now
@@ -958,11 +957,11 @@ with tab_wizard:
         # Use clustering scaler (for clustering only)
         x_input_cluster = build_input_vector(list(X_all.columns), profile)
         x_scaled_cluster = scaler.transform(x_input_cluster)
-        assigned_cluster = int(kmeans.predict(x_scaled_cluster)[0]))
+        assigned_cluster = int(kmeans.predict(x_scaled_cluster)[0])
 
         # Get neighbors
         neighbors = nearest_neighbors_in_cluster(
-            x_scaled, assigned_cluster, view, X_all, scaler, kmeans, topn=topn
+            x_scaled_cluster, assigned_cluster, view, X_all, scaler, kmeans, topn=topn
         )
 
         st.markdown("---")
@@ -1010,8 +1009,10 @@ with tab_wizard:
 
         positioning_insights = []
         
-        concept_weight = float(x_input.iloc[0].get("GameWeight", np.nan))
+        concept_weight = float(profile.get("GameWeight", np.nan))
         cluster_weight = med("GameWeight")
+
+        
         if np.isfinite(concept_weight) and np.isfinite(cluster_weight):
             if concept_weight > cluster_weight + 0.4:
                 positioning_insights.append("🧩 **Higher complexity** than similar games → Appeals to hardcore gamers but smaller market")
@@ -1020,7 +1021,7 @@ with tab_wizard:
             else:
                 positioning_insights.append("⚖️ **Complexity aligns** with similar games → Good market fit")
 
-        concept_time = float(x_input.iloc[0].get("Play Time", np.nan))
+        concept_time = float(profile.get("Play Time", np.nan))
         cluster_time = med("Play Time")
         if np.isfinite(concept_time) and np.isfinite(cluster_time):
             if concept_time > cluster_time + 30:
@@ -1391,6 +1392,7 @@ st.markdown(
     """, 
     unsafe_allow_html=True
 )
+
 
 
 
