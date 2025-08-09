@@ -120,6 +120,18 @@ h1, h2, h3, h4 {{ color: {ACCENT}; font-family: 'Georgia', serif; }}
 }}
 </style>
 """, unsafe_allow_html=True)
+st.markdown(f"""
+<style>
+.stApp blockquote {{
+    background: linear-gradient(90deg, {CHART_BG} 0%, #FFF 100%);
+    border-left: 5px solid {ACCENT};
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+    color: {MUTED};
+}}
+</style>
+""", unsafe_allow_html=True)
 
 # Configuration
 DEFAULT_PARQUET_PATH = "cleaned_large_bgg_dataset.parquet"
@@ -789,7 +801,6 @@ st.sidebar.checkbox("Show narrative insights", True, key="show_narrative")
 
 def narr(md: str):
     if st.session_state.get("show_narrative", True):
-        # render as a blockquote so markdown (like **bold**) is parsed
         bl = "> " + md.strip().replace("\n", "\n> ")
         st.markdown(bl)
 
@@ -2265,6 +2276,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
