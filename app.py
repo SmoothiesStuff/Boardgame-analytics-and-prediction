@@ -1762,9 +1762,9 @@ with tab_wizard:
                     raise RuntimeError("Missing rating and/or owners model")
             
                 # 4) Predict (raw model outputs; no heuristic remaps)
-                predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))*1.15
+                predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))*1.1
                 owners_val = float(_predict_agnostic(owners_model, X_in, training_cols))
-                predicted_owners = int(max(0, round(owners_val)))*20
+                predicted_owners = int(max(0, round(owners_val)))*15
             
             except Exception as e:
                 # Neighbor fallback (kept intact)
@@ -1776,8 +1776,8 @@ with tab_wizard:
                 w = 1.0 / (1e-9 + neighbors_sorted["__dist"].astype(float))
                 w = w / w.sum()
             
-                predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))*1.15
-                predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))*20
+                predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))*1.1
+                predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))*15
 
             
           
@@ -2793,6 +2793,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
