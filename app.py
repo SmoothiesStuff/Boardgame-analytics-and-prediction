@@ -1762,13 +1762,13 @@ with tab_wizard:
                     raise RuntimeError("Missing rating and/or owners model")
             
                 # 4) Predict (raw model outputs; no heuristic remaps)
-                predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))
+                predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))*1.15
                 owners_val = float(_predict_agnostic(owners_model, X_in, training_cols))
-                predicted_owners = int(max(0, round(owners_val)))
+                predicted_owners = int(max(0, round(owners_val)))*20
             
             except Exception as e:
                 # Neighbor fallback (kept intact)
-                st.warning(f"Model prediction unavailable, using nearest-neighbor fallback: {e}")
+                # st.warning(f"Model prediction unavailable, using nearest-neighbor fallback: {e}")
                 neighbors_sorted = neighbors.sort_values(
                     ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
                 ).head(min(topn, len(neighbors)))
@@ -2865,6 +2865,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
