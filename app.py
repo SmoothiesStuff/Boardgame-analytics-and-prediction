@@ -139,11 +139,22 @@ EXCLUDE_FOR_CLUSTERING = [
 ]
 
 MODEL_PATHS = {
-    "rating_xgb": "models/rating_xgb.joblib", 
-    "sales_xgb": "models/sales_xgb.joblib",
+    # "rating_xgb": "models/rating_xgb.joblib", #old models, not so gooood
+    # "sales_xgb": "models/sales_xgb.joblib",
+    "rating_xgb": "models/train_model_rating_xgb.joblib",
+    "owned_rf":   "models/train_model_owned_rf.joblib",          # or leave missing if you used XGB Poisson
+    "owned_xgb":  "models/train_model_owned_xgb_poisson.joblib", # optional fallback 
 }
-INPUT_SCALER_PATH = "models/input_scaler.joblib"
-PRED_EXCLUDE = {"Cluster", "PCA1", "PCA2", "LogOwned", "SalesPercentile", "__dist"}
+INPUT_SCALER_PATH = "models/input_scaler.joblib"  
+# Features not used for training
+PRED_EXCLUDE = {
+    "ID","Name","BGGId","Users Rated","Rating Average","BayesAvgRating","AvgRating",
+    "Owned Users","LogOwned","BGG Rank","StdDev",
+    "NumWish","NumWant","NumComments","NumWeightVotes",
+    "Rank:strategygames","Rank:abstracts","Rank:familygames","Rank:thematic",
+    "Rank:cgs","Rank:wargames","Rank:partygames","Rank:childrensgames",
+    "Cluster","PCA1","PCA2","SalesPercentile","__dist"
+}
 
 # Enhanced data loading with caching
 @st.cache_data(show_spinner=True, ttl=3600)
@@ -1053,6 +1064,9 @@ pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
 
 # Prepare data and clustering
 X_all, meta = split_features(df)
+for _c in ("NumWish","NumWant"):
+    if _c in X_all.columns:
+        X_all = X_all.drop(columns=[_c])   #don't predict off theses
 scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
 
 # Add derived features
@@ -1483,7 +1497,32 @@ with tab_wizard:
         # >>> Submit button must be inside the form <<<
         analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", type="primary", use_container_width=True)
 
-        
+    def _predict_agnostic(model, X_df, feature_names):
+    """
+    Works with sklearn estimators OR xgboost.Booster saved from the notebook.
+    """
+    # Try sklearn-style first
+    try:
+        return float(model.predict(X_df.values)[0])
+    except Exception:
+        pass
+    # Try native XGBoost Booster
+    try:
+        import xgboost as xgb
+        dtest = xgb.DMatrix(X_df.values, feature_names=list(feature_names))
+        it = getattr(model, "best_iteration", None)
+        if it is not None:
+            try:
+                return float(model.predict(dtest, iteration_range=(0, it + 1))[0])
+            except TypeError:
+                pass
+        ntree = getattr(model, "best_ntree_limit", 0)
+        if ntree:
+            return float(model.predict(dtest, ntree_limit=ntree)[0])
+        return float(model.predict(dtest)[0])
+    except Exception:
+        raise
+    
     if analyze_button:
         # Build comprehensive profile
         profile = {
@@ -1536,57 +1575,72 @@ with tab_wizard:
             
             # AI Predictions section
             st.markdown("### 🤖 AI Performance Predictions")
-            
+
+            # --- Load models and compute predictions (minimal, aligned to training) ---
             models = load_models(MODEL_PATHS)
             
-            pred_cols = st.columns(4)
-            
-            # Mock predictions if no models
-            if not models:
-                # Generate realistic predictions based on similar games
-                predicted_rating = neighbors["AvgRating"].mean() + np.random.normal(0, 0.2)
-                predicted_rating = max(5.0, min(8.5, predicted_rating))
-                predicted_owners = int(neighbors["Owned Users"].median() * np.random.uniform(0.8, 1.2))
-                confidence = 75 + np.random.randint(-10, 15)
+            if not any(k in models for k in ("rating_xgb","owned_rf","owned_xgb")):
+                # Fallback to neighbor-based guesses
+                predicted_rating  = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
+                predicted_owners  = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
                 percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
+                d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
+                confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
             else:
-                # Use trained models
+                # 1) Recover training columns (prefer scaler -> saved JSON -> model -> fallback)
                 scaler_in = models.get("_input_scaler")
-            
-                # Pick feature list (prefer scaler feature names; fall back to model or X_all)
+                training_cols = None
                 if scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
-                    training_cols = list(scaler_in.feature_names_in_)
-                elif "rating_xgb" in models and hasattr(models["rating_xgb"], "feature_names_in_"):
-                    training_cols = list(models["rating_xgb"].feature_names_in_)
-                elif "sales_xgb" in models and hasattr(models["sales_xgb"], "feature_names_in_"):
-                    training_cols = list(models["sales_xgb"].feature_names_in_)
-                else:
-                    training_cols = list(X_all.columns)
+                    training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
+                elif os.path.exists("models/train_model_feature_names.json"):
+                    import json
+                    try:
+                        with open("models/train_model_feature_names.json","r",encoding="utf-8") as f:
+                            training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
+                    except Exception:
+                        training_cols = None
+                if training_cols is None:
+                    for _k in ("rating_xgb","owned_rf","owned_xgb"):
+                        mdl = models.get(_k)
+                        if mdl is not None and hasattr(mdl, "feature_names_in_"):
+                            training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
+                            break
+                if training_cols is None:
+                    training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
             
+                # 2) Build aligned single row (reuses your existing helper)
                 X_pred = align_profile_to_training(profile, training_cols, scaler=scaler_in)
             
-                # Predict rating
-                if "rating_xgb" in models:
-                    predicted_rating = float(models["rating_xgb"].predict(X_pred)[0])
+                # 3) Predict rating
+                rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
+                if rating_model is not None:
+                    try:
+                        predicted_rating = _predict_agnostic(rating_model, X_pred, training_cols)
+                    except Exception:
+                        predicted_rating = float(neighbors["AvgRating"].mean())
                 else:
                     predicted_rating = float(neighbors["AvgRating"].mean())
             
-                # Predict owners
-                if "sales_xgb" in models:
-                    owners_pred = models["sales_xgb"].predict(X_pred)[0]
-                    # If your sales model was trained on log1p(owners), uncomment next line:
-                    # owners_pred = np.expm1(owners_pred)
-                    predicted_owners = int(max(0, owners_pred))
+                # 4) Predict owners (prefer RF, else Poisson XGB)
+                owners_model = models.get("owned_rf") or models.get("owned_xgb")
+                if owners_model is not None:
+                    try:
+                        owners_val = _predict_agnostic(owners_model, X_pred, training_cols)
+                        predicted_owners = int(max(0, owners_val))
+                    except Exception:
+                        predicted_owners = int(neighbors["Owned Users"].median())
                 else:
                     predicted_owners = int(neighbors["Owned Users"].median())
             
-                # Percentile vs market
+                # 5) Confidence & percentile
                 percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
-            
-                # Simple confidence from neighbor tightness (0–100 clip)
-                d = neighbors["__dist"]
-                denom = (d.std() if d.std() > 1e-6 else 1.0)
+                d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
                 confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
+            
+            # Create the 4 metric columns (used below)
+            pred_cols = st.columns(4)
+
+            
             
             with pred_cols[0]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
@@ -2599,97 +2653,8 @@ with tab_synergies:
     else:
         st.info("Not enough data to calculate mechanic synergies with current filters")
 
-# Footer with additional resources
+# Footer 
 narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
-st.markdown("### 📚 Additional Resources")
-
-resource_cols = st.columns(4)
-
-with resource_cols[0]:
-    st.markdown("""
-    **📖 Documentation**
-    - [BGG API Guide](https://boardgamegeek.com/wiki/page/BGG_XML_API2)
-    - [Game Design Theory](https://www.google.com)
-    - [Market Analysis Methods](https://www.google.com)
-    """)
-
-with resource_cols[1]:
-    st.markdown("""
-    **🛠️ Tools**
-    - [Component Calculator](https://www.google.com)
-    - [Prototype Generator](https://www.google.com)
-    - [Playtest Tracker](https://www.google.com)
-    """)
-
-with resource_cols[2]:
-    st.markdown("""
-    **👥 Community**
-    - [Designer Forums](https://boardgamegeek.com/forum)
-    - [Publisher Directory](https://www.google.com)
-    - [Playtest Groups](https://www.google.com)
-    """)
-
-with resource_cols[3]:
-    st.markdown("""
-    **📊 Data Sources**
-    - BoardGameGeek Database
-    - {len(df):,} games analyzed
-    - Updated: {pd.Timestamp.now().strftime('%Y-%m-%d')}
-    """)
-
-st.markdown(
-    f"""
-    <div style='text-align: center; color: {MUTED}; padding: 2rem; margin-top: 2rem;'>
-    <strong>🎲 Board Game Developer Console - Professional Edition</strong><br>
-    Transforming data into successful game designs<br>
-    Built with ❤️ for the board game community
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
