@@ -2192,8 +2192,8 @@ with tab_wizard:
                     
                     st.plotly_chart(fig_trajectory, use_container_width=True)
     
-except Exception as e:
-    _self_heal_reset_and_rerun("ANALYZE", e)            
+    except Exception as e:
+        _self_heal_reset_and_rerun("ANALYZE", e)            
 # Trend Analysis Tab
 with tab_trends:
     st.markdown("## 📈 Market Trend Analysis")
@@ -2680,6 +2680,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
