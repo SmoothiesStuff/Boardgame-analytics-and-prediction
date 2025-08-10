@@ -1705,7 +1705,7 @@ with tab_wizard:
             
             # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
             owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
-            predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.65
+            predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.4
 
 
 ###################end stand in block ####################################
@@ -2801,6 +2801,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
