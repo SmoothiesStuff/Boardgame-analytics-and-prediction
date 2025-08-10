@@ -1893,8 +1893,27 @@ with tab_wizard:
             m1, m2, m3, m4, m5, m6 = st.columns(6)
             with m1:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Adjusted Owners", f"{int(effective_units):,}", f"base {int(owners_base):,}")
-                st.caption(f"Anchor ${anchor_price:.0f} • fee {int(channel_fee_pct*100)}% • returns {int(returns_pct*100)}%")
+            
+                # delta should be the difference vs base owners
+                delta_units = int(round(effective_units - owners_base))
+                st.metric(
+                    "Adjusted owners (after price & returns)",
+                    f"{int(round(effective_units)):,}",
+                    delta=f"{delta_units:+,}"
+                )
+            
+                # Optional: show the components so the math is obvious
+                if owners_base > 0:
+                    price_mult_raw = (target_price / max(anchor_price, 1.0)) ** elasticity if apply_sensitivity else 1.0
+                    # reflect clipping that was applied to owners_adj
+                    price_mult_effective = (owners_adj / owners_base) if owners_base > 0 else 1.0
+                else:
+                    price_mult_raw = price_mult_effective = 1.0
+            
+                st.caption(
+                    f"Base {int(round(owners_base)):,} • price x{price_mult_effective:.2f} "
+                    f"(raw {price_mult_raw:.2f}) • returns {int(returns_pct*100)}%"
+                )
                 st.markdown('</div>', unsafe_allow_html=True)
             with m2:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
@@ -1923,37 +1942,7 @@ with tab_wizard:
                 st.metric("ROI", roi_disp)
                 st.caption("Net profit ÷ fixed costs")
                 st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Profit vs Price sensitivity
-            st.markdown("#### 📈 Profit vs Price (sensitivity)")
-            pmin, pmax = max(10, anchor_price*0.6), min(150, anchor_price*1.4)
-            prices = np.linspace(pmin, pmax, 50)
-            profits = []
-            for p in prices:
-                net_u = p * (1 - channel_fee_pct)
-                gp_u = net_u - (unit_cogs + shipping_per_unit)
-                if apply_sensitivity:
-                    own = owners_base * (p / max(anchor_price, 1.0)) ** elasticity
-                    own = np.clip(own, owners_base * 0.6, owners_base * 1.4)
-                else:
-                    own = owners_base
-                eff = own * (1 - returns_pct)
-                profits.append(gp_u * eff - fixed_costs)
-            
-            fig_price = go.Figure()
-            fig_price.add_trace(go.Scatter(x=prices, y=profits, mode="lines", name="Profit"))
-            fig_price.add_vline(x=msrp, line_dash="dash", line_color="red", annotation_text="Your price")
-            fig_price.add_vline(x=anchor_price, line_dash="dot", line_color="gray", annotation_text="Anchor")
-            fig_price.update_layout(
-                title="Projected Net Profit vs MSRP",
-                xaxis_title="MSRP ($)", yaxis_title="Profit ($)",
-                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=380
-            )
-            st.plotly_chart(fig_price, use_container_width=True)
-            narr("""
-            **Price and promise.** Premium pricing only works when the table can feel why. Component quality helps, but repeatable decisions and clean turns are what justify a number. Break even is a milestone. Word of mouth is the margin.
-            """)
-
+                
             ########## design analysis visuals ##########
             st.markdown("### Your Game and It's Cluster")
             
@@ -2821,6 +2810,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
