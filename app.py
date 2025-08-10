@@ -1693,7 +1693,7 @@ with tab_wizard:
                 r_src_lo, r_src_hi = 5.5, 6.5
                 o_src_lo, o_src_hi = 200.0, 3000.0
             
-            # Target bands you asked for
+            # Target bands 
             r_dst_lo, r_dst_hi = 6.0, 8.0
             o_dst_lo, o_dst_hi = 500.0, 20000.0
             
@@ -1703,9 +1703,9 @@ with tab_wizard:
             
             predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
             
-            # Small bonus: let higher ratings nudge owners a bit (keeps things feeling consistent)
+            # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
             owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
-            predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))
+            predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.8
 
 
 ###################end stand in block ####################################
@@ -1778,7 +1778,7 @@ with tab_wizard:
             
             # Smooth to % with gentle S-curve and calibrated bounds
             confidence = int(np.round(_interp(_sig((raw_success - 0.55) / 0.18), 0, 1, 30, 97)))
-            percentile = rating_pct  # keep your existing UI text working
+            percentile = rating_pct  # keep existing UI text working
 ################## smart market size section ############################
             def market_size_label(predicted_owners: int, ref_df: pd.DataFrame, cluster_df: Optional[pd.DataFrame] = None):
                 """
@@ -2801,6 +2801,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
