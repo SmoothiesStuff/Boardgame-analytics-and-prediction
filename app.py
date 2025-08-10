@@ -1894,27 +1894,39 @@ with tab_wizard:
             with m1:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
             
-                # delta should be the difference vs base owners
-                delta_units = int(round(effective_units - owners_base))
+                # --- define the two numbers explicitly ---
+                reported_owners = int(round(owners_base))          # BEFORE price elasticity & returns
+                sales_estimate  = int(round(effective_units))      # AFTER price elasticity & returns
+            
+                # delta vs reported owners (can be up OR down)
+                delta_abs = sales_estimate - reported_owners
+                delta_pct = (sales_estimate / reported_owners - 1.0) if reported_owners > 0 else 0.0
+            
                 st.metric(
-                    "Adjusted owners (after price & returns)",
-                    f"{int(round(effective_units)):,}",
-                    delta=f"{delta_units:+,}"
+                    label="Sales estimate (after price & returns)",
+                    value=f"{sales_estimate:,}",
+                    delta=f"{delta_abs:+,} ({delta_pct:+.0%})",
+                    delta_color="normal"   # "normal" = green for increases, red for decreases
                 )
             
-                # Optional: show the components so the math is obvious
+                # make the math obvious
                 if owners_base > 0:
-                    price_mult_raw = (target_price / max(anchor_price, 1.0)) ** elasticity if apply_sensitivity else 1.0
-                    # reflect clipping that was applied to owners_adj
-                    price_mult_effective = (owners_adj / owners_base) if owners_base > 0 else 1.0
+                    anchor = estimate_anchor_price(
+                        float(complexity), component_quality, production_quality,
+                        int(max_players), int(play_time)
+                    )
+                    price_mult_raw = (target_price / max(anchor, 1.0)) ** elasticity if apply_sensitivity else 1.0
+                    price_mult_effective = owners_adj / owners_base if apply_sensitivity and owners_base > 0 else 1.0
                 else:
                     price_mult_raw = price_mult_effective = 1.0
             
                 st.caption(
-                    f"Base {int(round(owners_base)):,} • price x{price_mult_effective:.2f} "
+                    f"Reported owners: {reported_owners:,} • price x{price_mult_effective:.2f} "
                     f"(raw {price_mult_raw:.2f}) • returns {int(returns_pct*100)}%"
                 )
+            
                 st.markdown('</div>', unsafe_allow_html=True)
+
             with m2:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
                 st.metric("Gross Margin", f"{gross_margin_pct*100:.0f}%/unit")
@@ -2810,6 +2822,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
