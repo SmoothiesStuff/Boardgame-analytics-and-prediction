@@ -1438,8 +1438,8 @@ with tab_wizard:
         st.markdown("#### Core Specifications")
         spec_cols = st.columns(4)
         with spec_cols[0]:
-            year_published = st.number_input("Release Year", value=preset_data["year"],
-                                             min_value=CURRENT_YEAR, max_value=CURRENT_YEAR+2, key="year_input")
+            year_published = st.number_input("Release Year (2022 data incomplete, assumes 2021)", value=preset_data["year"],
+                                             min_value=CURRENT_YEAR-30, max_value=CURRENT_YEAR-1, key="year_input")
             min_players = st.number_input("Min Players", value=preset_data["min_players"],
                                           min_value=1, max_value=10, key="min_players_input")
         with spec_cols[1]:
@@ -1659,7 +1659,8 @@ with tab_wizard:
                 # --- Fallback using neighbors ---
                 predicted_rating = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
                 predicted_owners = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
-            
+            predicted_rating *= 1.1
+            predicted_owners *= 1.1  #(stand in for low vector inputs, need to address)
             # Confidence & percentile — used in both paths
             percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
             d = neighbors["__dist"]
@@ -2669,5 +2670,6 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
