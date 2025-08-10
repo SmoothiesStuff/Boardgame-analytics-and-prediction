@@ -625,7 +625,6 @@ def create_market_evolution_timeline(df: pd.DataFrame) -> go.Figure:
     )
     
     return fig
-from streamlit_plotly_events import plotly_events
 
 def build_mech_network_fig_static(synergies_df: pd.DataFrame, top_n: int = 30) -> go.Figure:
     if synergies_df is None or len(synergies_df) == 0:
@@ -1572,134 +1571,133 @@ with tab_wizard:
             
             # AI Predictions section
             st.markdown("### 🤖 AI Performance Predictions")
-
-            # --- Load models and compute predictions (minimal, aligned to training) ---
-           # --- Load models and compute predictions (aligned to training artifacts) ---
-        models = load_models(MODEL_PATHS)
-        
-        if not any(k in models for k in ("rating_xgb", "owned_rf", "owned_xgb")):
-            # Fallback to neighbor-based guesses
-            predicted_rating  = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
-            predicted_owners  = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
-            percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
-            d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
-            confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
-        else:
-            # 1) Recover training feature order (prefer saved JSON)
-            scaler_in = models.get("_input_scaler")
-            training_cols = None
-        
-            # Prefer the artifact you saved with the notebook
-            if os.path.exists(FEATURE_COLS_PATH):
-                import json
+            # --- Predictions & Rendering (robust to missing models) ---
+            FEATURE_COLS_PATH = "models/feature_cols.json"  # define this once
+            
+            models = load_models(MODEL_PATHS)
+            use_models = any(k in models for k in ("rating_xgb", "owned_rf", "owned_xgb"))
+            
+            # Guard: if the currently selected cluster has no games (due to tight filters),
+            # fall back to nearest neighbors across ALL filtered games.
+            if len(cluster_games) == 0:
+                st.warning("No games in the selected segment under current filters. Falling back to all filtered games.")
+                X_cluster = X_all.loc[view_f.index]
+                X_cluster_scaled = scaler.transform(X_cluster)
+                distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
+                tmp = view_f.copy()
+                tmp["__dist"] = distances
+                neighbors = tmp.nsmallest(min(topn, len(tmp)), "__dist")
+            else:
+                # Normal neighbor selection within the predicted cluster
+                X_cluster = X_all.loc[cluster_games.index]
+                X_cluster_scaled = scaler.transform(X_cluster)
+                distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
+                cluster_games = cluster_games.copy()
+                cluster_games["__dist"] = distances
+                neighbors = cluster_games.nsmallest(min(topn, len(cluster_games)), "__dist")
+            
+            if len(neighbors) == 0:
+                st.error("Couldn’t find similar games to compare against. Loosen filters and try again.")
+                st.stop()
+            
+            # === Compute predictions (models if available, otherwise neighbor fallback) ===
+            if use_models:
+                scaler_in = models.get("_input_scaler")
+                training_cols = None
+            
+                # 1) Try to load saved feature ordering from JSON
                 try:
-                    with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
-                        training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
+                    if os.path.exists(FEATURE_COLS_PATH):
+                        import json
+                        with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
+                            training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
                 except Exception:
                     training_cols = None
-        
-            # Then try scaler’s recorded feature names
-            if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
-                training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
-        
-            # Then try model feature names
-            if training_cols is None:
-                for _k in ("rating_xgb","owned_rf","owned_xgb"):
-                    mdl = models.get(_k)
-                    if mdl is not None and hasattr(mdl, "feature_names_in_"):
-                        training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
-                        break
-        
-            # Fallback: dataset columns (minus excludes)
-            if training_cols is None:
-                training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
-        
-            # 2) Build aligned row, then scale with the saved scaler
-            X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
-        
-            X_in = X_pred_raw
-            if scaler_in is not None:
-                try:
-                    X_scaled = scaler_in.transform(X_pred_raw.values)
-                    X_in = pd.DataFrame(X_scaled, columns=training_cols)
-                except Exception:
-                    X_in = X_pred_raw  # trees are robust to unscaled data
-        
-            # 3) Predict rating
-            rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
-            if rating_model is not None:
-                try:
-                    predicted_rating = _predict_agnostic(rating_model, X_in, training_cols)
-                    predicted_rating = float(np.clip(predicted_rating, 0.0, 10.0))
-                except Exception:
+            
+                # 2) Else use scaler’s or model’s feature names
+                if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
+                    training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
+                if training_cols is None:
+                    for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
+                        mdl = models.get(_k)
+                        if mdl is not None and hasattr(mdl, "feature_names_in_"):
+                            training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
+                            break
+                if training_cols is None:
+                    training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
+            
+                # 3) Align, optional scale, predict
+                X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
+                X_in = X_pred_raw
+                if scaler_in is not None:
+                    try:
+                        X_scaled_cols = scaler_in.transform(X_pred_raw.values)
+                        X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
+                    except Exception:
+                        X_in = X_pred_raw
+            
+                rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
+                if rating_model is not None:
+                    try:
+                        predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))
+                    except Exception:
+                        predicted_rating = float(neighbors["AvgRating"].mean())
+                else:
                     predicted_rating = float(neighbors["AvgRating"].mean())
-            else:
-                predicted_rating = float(neighbors["AvgRating"].mean())
-        
-            # 4) Predict owners
-            owners_model = models.get("owned_rf") or models.get("owned_xgb")
-            if owners_model is not None:
-                try:
-                    owners_val = _predict_agnostic(owners_model, X_in, training_cols)
-                    predicted_owners = int(max(0, owners_val))
-                except Exception:
+            
+                owners_model = models.get("owned_rf") or models.get("owned_xgb")
+                if owners_model is not None:
+                    try:
+                        owners_val = _predict_agnostic(owners_model, X_in, training_cols)
+                        predicted_owners = int(max(0, owners_val))
+                    except Exception:
+                        predicted_owners = int(neighbors["Owned Users"].median())
+                else:
                     predicted_owners = int(neighbors["Owned Users"].median())
+            
             else:
-                predicted_owners = int(neighbors["Owned Users"].median())
-        
-            # 5) Confidence & percentile
+                # --- Fallback using neighbors ---
+                predicted_rating = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
+                predicted_owners = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
+            
+            # Confidence & percentile — used in both paths
             percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
-            d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
-            confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
-
-            # Create the 4 metric columns (used below)
+            d = neighbors["__dist"]
+            denom = (d.std() if d.std() > 1e-6 else 1.0)
+            confidence = int(np.clip(70 + (1 - d.mean() / denom) * 20, 40, 95))
+            market_size = "Niche" if predicted_owners < 5_000 else "Mid-Market" if predicted_owners < 50_000 else "Mass Market"
+            
+            # === Always render the prediction cards (regardless of models present) ===
             pred_cols = st.columns(4)
-
+            
             with pred_cols[0]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
                 st.metric("Predicted Rating", f"{predicted_rating:.2f}/10")
-                st.progress(predicted_rating/10)
-                st.caption(f"Top {100-percentile:.0f}% percentile")
+                st.progress(predicted_rating / 10)
+                st.caption(f"Top {100 - percentile:.0f}% percentile")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with pred_cols[1]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
                 st.metric("Expected Owners", f"{predicted_owners:,}")
-                market_size = "Niche" if predicted_owners < 5000 else "Mid-Market" if predicted_owners < 50000 else "Mass Market"
                 st.caption(f"📊 {market_size} potential")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with pred_cols[2]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
                 st.metric("Success Probability", f"{confidence}%")
-                st.progress(confidence/100)
+                st.progress(confidence / 100)
                 risk_level = "Low Risk" if confidence > 70 else "Moderate Risk" if confidence > 50 else "High Risk"
                 st.caption(f"⚠️ {risk_level}")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with pred_cols[3]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-            
-                # Use pricing inputs from the form for a quick, honest ROI signal
-                msrp = float(target_price)  # alias for clarity
-                net_per_unit_card = msrp * (1 - channel_fee_pct)
-                gp_per_unit_card = net_per_unit_card - (unit_cogs + shipping_per_unit)
-            
-                # Simple ROI multiple using current predicted owners & fixed costs
-                fixed_costs_card = float(marketing_fixed + misc_fixed)
-                roi_estimate = (
-                    (gp_per_unit_card * max(float(predicted_owners) * (1 - returns_pct), 0) - fixed_costs_card)
-                    / fixed_costs_card
-                    if fixed_costs_card > 0 else float("inf")
-                )
-            
-                st.metric("ROI Estimate", "∞" if not math.isfinite(roi_estimate) else f"{roi_estimate:.1f}x")
-                payback = "6 months" if (math.isfinite(roi_estimate) and roi_estimate > 2) else (
-                          "12 months" if (math.isfinite(roi_estimate) and roi_estimate > 1) else "18+ months")
-                st.caption(f"💰 Payback: {payback}")
+                # Placeholders; real finance numbers are computed later
+                st.metric("ROI Estimate", "—")
+                st.caption("Will compute below from your pricing inputs")
                 st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Narrative (outside the pred_cols blocks)
+
             narr(
                 "**Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. "
                 "If the model likes your rating but owners look soft, the design might be niche or overpriced. "
@@ -2671,4 +2669,5 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
