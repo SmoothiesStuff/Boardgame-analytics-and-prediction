@@ -1154,7 +1154,7 @@ for cid in view_f["Cluster"].unique():
     }
 
 # Header metrics with enhanced insights
-st.markdown("## 📊 Market Overview")
+st.markdown("##  Market Overview")
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
@@ -1210,7 +1210,7 @@ tab_intel, tab_wizard, tab_trends, tab_segments, tab_synergies = st.tabs([
 
 # Market Intelligence Tab
 with tab_intel:
-    st.markdown("## 🎯 Strategic Market Intelligence")
+    st.markdown("## Market Intelligence")
     
     # Market opportunity analysis
     st.markdown("### 🏆 Top Market Opportunities")
@@ -2213,7 +2213,7 @@ with tab_wizard:
             )
             
             # Visual comparison
-            st.markdown("### 📊 Visual Market Comparison")
+            st.markdown("### Market Comparison")
             
             comp_col1, comp_col2 = st.columns(2)
             
@@ -2307,81 +2307,9 @@ with tab_wizard:
                 
                 st.plotly_chart(fig_trajectory, use_container_width=True)
             
-            # Export options
-            st.markdown("### 💾 Export Your Analysis")
-            
-            export_cols = st.columns(3)
-            
-            with export_cols[0]:
-                analysis_data = {
-                    "Design": [current_preset],
-                    "Predicted_Rating": [predicted_rating],
-                    "Expected_Owners": [predicted_owners],
-                    "Success_Probability": [confidence],
-                    "Complexity": [complexity],
-                    "Play_Time": [play_time],
-                    "Target_Price": [target_price]
-                }
-                analysis_df = pd.DataFrame(analysis_data)
-                
-                st.download_button(
-                    "📊 Download Analysis Report",
-                    data=analysis_df.to_csv(index=False).encode('utf-8'),
-                    file_name=f"game_analysis_{current_preset.replace(' ', '_').lower()}.csv",
-                    mime="text/csv"
-                )
-            
-            with export_cols[1]:
-                st.download_button(
-                    "🎮 Download Similar Games",
-                    data=neighbor_display.to_csv(index=False).encode('utf-8'),
-                    file_name=f"similar_games_{current_preset.replace(' ', '_').lower()}.csv",
-                    mime="text/csv"
-                )
-            
-            with export_cols[2]:
-                # Generate a simple text report
-                report = f"""
-BOARD GAME DESIGN ANALYSIS REPORT
-==================================
-Design Archetype: {current_preset}
-Analysis Date: {pd.Timestamp.now().strftime('%Y-%m-%d')}
-
-PREDICTED PERFORMANCE
---------------------
-Expected Rating: {predicted_rating:.2f}/10
-Expected Owners: {predicted_owners:,}
-Success Probability: {confidence}%
-Market Segment: {market_size}
-
-KEY SPECIFICATIONS
------------------
-Complexity: {complexity}/5.0
-Play Time: {play_time} minutes
-Player Count: {min_players}-{max_players}
-Minimum Age: {min_age}+
-Target Price: ${target_price}
-
-TOP RECOMMENDATIONS
-------------------
-{chr(10).join([f'{i+1}. {rec}' for i, rec in enumerate(recommendations[:3])])}
-
-SIMILAR SUCCESSFUL GAMES
------------------------
-{chr(10).join([f"- {row['Name']} (Rating: {row['AvgRating']:.2f}, Owners: {row['Owned Users']:,})" 
-               for _, row in neighbors.head(3).iterrows()])}
-                """
-                
-                st.download_button(
-                    "📄 Download Full Report",
-                    data=report.encode('utf-8'),
-                    file_name=f"design_report_{current_preset.replace(' ', '_').lower()}.txt",
-                    mime="text/plain"
-                )
-
 # Trend Analysis Tab
 with tab_trends:
-    st.markdown("## 📈 Market Trend Analysis & Forecasting")
+    st.markdown("## 📈 Market Trend Analysis")
     
     # Trend timeline selector
     trend_years = st.slider(
@@ -2865,6 +2793,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
