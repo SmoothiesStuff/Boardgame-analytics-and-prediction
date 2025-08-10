@@ -18,6 +18,11 @@ from sklearn.metrics import pairwise_distances
 from scipy import stats
 from joblib import load as joblib_load
 import warnings
+import random, hashlib, json
+
+RANDOM_SEED = 1337
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
 warnings.filterwarnings('ignore')
 
 # Page config & theme
@@ -1657,8 +1662,17 @@ with tab_wizard:
             
             else:
                 # --- Fallback using neighbors ---
-                predicted_rating = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
-                predicted_owners = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
+                # Deterministic, distance-weighted fallback (no randomness)
+                neighbors = neighbors.sort_values(
+                    ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
+                ).head(min(topn, len(neighbors)))
+                
+                w = 1.0 / (1e-9 + neighbors["__dist"].astype(float))
+                w = w / w.sum()
+                
+                predicted_rating = float(np.clip((neighbors["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))
+                predicted_owners = int(max(0, (neighbors["Owned Users"].astype(float) * w).sum()))
+                
             ########## soft calibration (quick testing only) ##########
             # stand in for low results because of empty vectors above. use nearest neghbors, boost ownership for good ratings
             def _interp(x, a, b, c, d):
@@ -2807,6 +2821,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
