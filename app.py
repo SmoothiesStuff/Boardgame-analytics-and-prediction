@@ -1659,14 +1659,48 @@ with tab_wizard:
                 # --- Fallback using neighbors ---
                 predicted_rating = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
                 predicted_owners = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
-            predicted_rating *= 1.2
-            predicted_owners *= 40  #(stand in for low vector inputs, need to address)
+            ########## soft calibration (quick testing only) ##########
+            # stand in for low results because of empty vectors above. use nearest neghbors, boost ownership for good ratings
+            def _interp(x, a, b, c, d):
+                # linear map [a,b] -> [c,d] with clamping
+                if b <= a: 
+                    return float(np.clip((c + d) / 2.0, c, d))
+                t = (x - a) / (b - a)
+                return float(c + np.clip(t, 0.0, 1.0) * (d - c))
+            
+            # Use neighbor distribution to set source ranges; fallback to sensible defaults
+            if len(neighbors) >= 5:
+                r_src_lo = float(neighbors["AvgRating"].quantile(0.25))
+                r_src_hi = float(neighbors["AvgRating"].quantile(0.75))
+                o_src_lo = float(neighbors["Owned Users"].quantile(0.25))
+                o_src_hi = float(neighbors["Owned Users"].quantile(0.90))
+            else:
+                # If neighbors are thin, assume your observed behavior (5.5–6.5 ratings, few hundred owners)
+                r_src_lo, r_src_hi = 5.5, 6.5
+                o_src_lo, o_src_hi = 200.0, 3000.0
+            
+            # Target bands you asked for
+            r_dst_lo, r_dst_hi = 6.0, 8.0
+            o_dst_lo, o_dst_hi = 500.0, 20000.0
+            
+            # Map predicted_rating and owners into those bands (with clamps)
+            predicted_rating = _interp(predicted_rating, r_src_lo, r_src_hi, r_dst_lo, r_dst_hi)
+            predicted_rating = float(np.clip(predicted_rating, 5.0, 9.2))  # hard safety clamp
+            
+            predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
+            
+            # Small bonus: let higher ratings nudge owners a bit (keeps things feeling consistent)
+            owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
+            predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))
+
+
+###################end stand in block ####################################
             # Confidence & percentile — used in both paths
             percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
             d = neighbors["__dist"]
             denom = (d.std() if d.std() > 1e-6 else 1.0)
             confidence = int(np.clip(70 + (1 - d.mean() / denom) * 20, 40, 95))
-            market_size = "Niche" if predicted_owners < 5_000 else "Mid-Market" if predicted_owners < 50_000 else "Mass Market"
+            market_size = "Niche" if predicted_owners < 5_000 else "Mid-Market" if predicted_owners < 20_000 else "Mass Market"
             
             # === Always render the prediction cards (regardless of models present) ===
             pred_cols = st.columns(4)
@@ -2670,6 +2704,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
