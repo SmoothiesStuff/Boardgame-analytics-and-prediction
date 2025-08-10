@@ -1023,7 +1023,7 @@ display_min_year = max(1900, min_year)
 yr_rng = st.sidebar.slider(
     "📅 Year Range 📅", 
     display_min_year, max_year, 
-    (max(1990, display_min_year), max_year),
+    (max(1950, display_min_year), max_year),
     help="Focus on specific time periods"
 )
 
@@ -1331,7 +1331,7 @@ with tab_intel:
     """)
 
     # Market evolution timeline
-    st.markdown("### 📈 Complete Market Evolution (1950-Present)")
+    st.markdown("### Complete Market Evolution (1950-Present)")
     evolution_fig = create_market_evolution_timeline(view_f)
     st.plotly_chart(evolution_fig, use_container_width=True)
     narr("""
@@ -2796,6 +2796,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
