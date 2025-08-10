@@ -1659,8 +1659,8 @@ with tab_wizard:
                 # --- Fallback using neighbors ---
                 predicted_rating = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
                 predicted_owners = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
-            predicted_rating *= 1.1
-            predicted_owners *= 10  #(stand in for low vector inputs, need to address)
+            predicted_rating *= 1.2
+            predicted_owners *= 40  #(stand in for low vector inputs, need to address)
             # Confidence & percentile — used in both paths
             percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
             d = neighbors["__dist"]
@@ -2670,6 +2670,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
