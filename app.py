@@ -2506,13 +2506,6 @@ with tab_trends:
     recent_3_years = trend_data[trend_data["Year Published"] >= CURRENT_YEAR - 3]
     
     if len(recent_3_years) > 10:
-        # Growth predictions
-        yearly_growth = trend_data.groupby("Year Published").size()
-        if len(yearly_growth) > 3:
-            recent_growth_rate = yearly_growth.iloc[-3:].pct_change().mean()
-            predicted_releases = int(yearly_growth.iloc[-1] * (1 + recent_growth_rate))
-            
-            st.write(f"📊 **Predicted new releases in {CURRENT_YEAR + 1}:** ~{predicted_releases} games")
         
         # Complexity predictions
         complexity_trend = trend_data.groupby("Year Published")["GameWeight"].mean()
@@ -2801,6 +2794,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
