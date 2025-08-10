@@ -1675,41 +1675,110 @@ with tab_wizard:
                 
             ########## soft calibration (quick testing only) ##########
             # stand in for low results because of empty vectors above. use nearest neghbors, boost ownership for good ratings
-            def _interp(x, a, b, c, d):
-                # linear map [a,b] -> [c,d] with clamping
-                if b <= a: 
-                    return float(np.clip((c + d) / 2.0, c, d))
-                t = (x - a) / (b - a)
-                return float(c + np.clip(t, 0.0, 1.0) * (d - c))
+            # def _interp(x, a, b, c, d):
+            #     # linear map [a,b] -> [c,d] with clamping
+            #     if b <= a: 
+            #         return float(np.clip((c + d) / 2.0, c, d))
+            #     t = (x - a) / (b - a)
+            #     return float(c + np.clip(t, 0.0, 1.0) * (d - c))
             
-            # Use neighbor distribution to set source ranges; fallback to sensible defaults
-            if len(neighbors) >= 5:
-                r_src_lo = float(neighbors["AvgRating"].quantile(0.25))
-                r_src_hi = float(neighbors["AvgRating"].quantile(0.75))
-                o_src_lo = float(neighbors["Owned Users"].quantile(0.25))
-                o_src_hi = float(neighbors["Owned Users"].quantile(0.90))
-            else:
-                # If neighbors are thin, assume your observed behavior (5.5–6.5 ratings, few hundred owners)
-                r_src_lo, r_src_hi = 5.5, 6.5
-                o_src_lo, o_src_hi = 200.0, 3000.0
+            # # Use neighbor distribution to set source ranges; fallback to sensible defaults
+            # if len(neighbors) >= 5:
+            #     r_src_lo = float(neighbors["AvgRating"].quantile(0.25))
+            #     r_src_hi = float(neighbors["AvgRating"].quantile(0.75))
+            #     o_src_lo = float(neighbors["Owned Users"].quantile(0.25))
+            #     o_src_hi = float(neighbors["Owned Users"].quantile(0.90))
+            # else:
+            #     # If neighbors are thin, assume your observed behavior (5.5–6.5 ratings, few hundred owners)
+            #     r_src_lo, r_src_hi = 5.5, 6.5
+            #     o_src_lo, o_src_hi = 200.0, 3000.0
             
-            # Target bands 
-            r_dst_lo, r_dst_hi = 6.0, 8.0
-            o_dst_lo, o_dst_hi = 500.0, 20000.0
+            # # Target bands 
+            # r_dst_lo, r_dst_hi = 6.0, 8.0
+            # o_dst_lo, o_dst_hi = 500.0, 20000.0
             
-            # Map predicted_rating and owners into those bands (with clamps)
-            predicted_rating = _interp(predicted_rating, r_src_lo, r_src_hi, r_dst_lo, r_dst_hi)
-            predicted_rating = float(np.clip(predicted_rating, 5.0, 9.2))  # hard safety clamp
+            # # Map predicted_rating and owners into those bands (with clamps)
+            # predicted_rating = _interp(predicted_rating, r_src_lo, r_src_hi, r_dst_lo, r_dst_hi)
+            # predicted_rating = float(np.clip(predicted_rating, 5.0, 9.2))  # hard safety clamp
             
-            predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
+            # predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
             
-            # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
-            owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
-            predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.4
-
+            # # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
+            # owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
+            # predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.4
 
 ###################end stand in block ####################################
-            # Confidence & percentile — used in both paths
+           # === Compute predictions (prefer trained models; fallback to nearest neighbors) ===
+            predicted_rating = None
+            predicted_owners = None
+            
+            try:
+                # 0) Models already loaded above:
+                # models = load_models(MODEL_PATHS)
+            
+                # 1) Resolve training feature order
+                scaler_in = models.get("_input_scaler")
+                training_cols = None
+                FEATURE_COLS_PATH = "models/feature_cols.json"
+            
+                # 1a) JSON list (preferred)
+                try:
+                    if os.path.exists(FEATURE_COLS_PATH):
+                        with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
+                            training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
+                except Exception:
+                    training_cols = None
+            
+                # 1b) Scaler feature names
+                if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
+                    training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
+            
+                # 1c) Model feature names
+                if training_cols is None:
+                    for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
+                        mdl = models.get(_k)
+                        if mdl is not None and hasattr(mdl, "feature_names_in_"):
+                            training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
+                            break
+            
+                # 1d) Fall back to current X_all
+                if training_cols is None:
+                    training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
+            
+                # 2) Align and optionally scale
+                X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
+                X_in = X_pred_raw
+                if scaler_in is not None:
+                    try:
+                        X_scaled_cols = scaler_in.transform(X_pred_raw.values)
+                        X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
+                    except Exception:
+                        X_in = X_pred_raw
+            
+                # 3) Get models; require both
+                rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
+                owners_model = models.get("owned_rf") or models.get("owned_xgb")
+                if rating_model is None or owners_model is None:
+                    raise RuntimeError("Missing rating and/or owners model")
+            
+                # 4) Predict (raw model outputs; no heuristic remaps)
+                predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))
+                owners_val = float(_predict_agnostic(owners_model, X_in, training_cols))
+                predicted_owners = int(max(0, round(owners_val)))
+            
+            except Exception as e:
+                # Neighbor fallback (kept intact)
+                st.warning(f"Model prediction unavailable, using nearest-neighbor fallback: {e}")
+                neighbors_sorted = neighbors.sort_values(
+                    ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
+                ).head(min(topn, len(neighbors)))
+            
+                w = 1.0 / (1e-9 + neighbors_sorted["__dist"].astype(float))
+                w = w / w.sum()
+            
+                predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))
+                predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))
+
             
           
             # ---------- SMART SUCCESS PROBABILITY (rating + owners + fit + alignment) ----------
@@ -2796,6 +2865,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
