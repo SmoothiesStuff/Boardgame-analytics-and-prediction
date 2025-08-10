@@ -1592,138 +1592,7 @@ with tab_wizard:
                 
                 # AI Predictions section
                 st.markdown("### 🤖 AI Performance Predictions")
-                # --- Predictions & Rendering (robust to missing models) ---
-                FEATURE_COLS_PATH = "models/feature_cols.json"  # define this once
-                
-                models = load_models(MODEL_PATHS)
-                use_models = any(k in models for k in ("rating_xgb", "owned_rf", "owned_xgb"))
-                
-                # Guard: if the currently selected cluster has no games (due to tight filters),
-                # fall back to nearest neighbors across ALL filtered games.
-                if len(cluster_games) == 0:
-                    st.warning("No games in the selected segment under current filters. Falling back to all filtered games.")
-                    X_cluster = X_all.loc[view_f.index]
-                    X_cluster_scaled = scaler.transform(X_cluster)
-                    distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
-                    tmp = view_f.copy()
-                    tmp["__dist"] = distances
-                    neighbors = tmp.nsmallest(min(topn, len(tmp)), "__dist")
-                else:
-                    # Normal neighbor selection within the predicted cluster
-                    X_cluster = X_all.loc[cluster_games.index]
-                    X_cluster_scaled = scaler.transform(X_cluster)
-                    distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
-                    cluster_games = cluster_games.copy()
-                    cluster_games["__dist"] = distances
-                    neighbors = cluster_games.nsmallest(min(topn, len(cluster_games)), "__dist")
-                
-                if len(neighbors) == 0:
-                    st.error("Couldn’t find similar games to compare against. Loosen filters and try again.")
-                    st.stop()
-                
-                # === Compute predictions (models if available, otherwise neighbor fallback) ===
-                if use_models:
-                    scaler_in = models.get("_input_scaler")
-                    training_cols = None
-                
-                    # 1) Try to load saved feature ordering from JSON
-                    try:
-                        if os.path.exists(FEATURE_COLS_PATH):
-                            import json
-                            with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
-                                training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
-                    except Exception:
-                        training_cols = None
-                
-                    # 2) Else use scaler’s or model’s feature names
-                    if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
-                        training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
-                    if training_cols is None:
-                        for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
-                            mdl = models.get(_k)
-                            if mdl is not None and hasattr(mdl, "feature_names_in_"):
-                                training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
-                                break
-                    if training_cols is None:
-                        training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
-                
-                    # 3) Align, optional scale, predict
-                    X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
-                    X_in = X_pred_raw
-                    if scaler_in is not None:
-                        try:
-                            X_scaled_cols = scaler_in.transform(X_pred_raw.values)
-                            X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
-                        except Exception:
-                            X_in = X_pred_raw
-                
-                    rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
-                    if rating_model is not None:
-                        try:
-                            predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))
-                        except Exception:
-                            predicted_rating = float(neighbors["AvgRating"].mean())
-                    else:
-                        predicted_rating = float(neighbors["AvgRating"].mean())
-                
-                    owners_model = models.get("owned_rf") or models.get("owned_xgb")
-                    if owners_model is not None:
-                        try:
-                            owners_val = _predict_agnostic(owners_model, X_in, training_cols)
-                            predicted_owners = int(max(0, owners_val))
-                        except Exception:
-                            predicted_owners = int(neighbors["Owned Users"].median())
-                    else:
-                        predicted_owners = int(neighbors["Owned Users"].median())
-                
-                else:
-                    # --- Fallback using neighbors ---
-                    # Deterministic, distance-weighted fallback (no randomness)
-                    neighbors = neighbors.sort_values(
-                        ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
-                    ).head(min(topn, len(neighbors)))
-                    
-                    w = 1.0 / (1e-9 + neighbors["__dist"].astype(float))
-                    w = w / w.sum()
-                    
-                    predicted_rating = float(np.clip((neighbors["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))
-                    predicted_owners = int(max(0, (neighbors["Owned Users"].astype(float) * w).sum()))
-                    
-                ########## soft calibration (quick testing only) ##########
-                # stand in for low results because of empty vectors above. use nearest neghbors, boost ownership for good ratings
-                # def _interp(x, a, b, c, d):
-                #     # linear map [a,b] -> [c,d] with clamping
-                #     if b <= a: 
-                #         return float(np.clip((c + d) / 2.0, c, d))
-                #     t = (x - a) / (b - a)
-                #     return float(c + np.clip(t, 0.0, 1.0) * (d - c))
-                
-                # # Use neighbor distribution to set source ranges; fallback to sensible defaults
-                # if len(neighbors) >= 5:
-                #     r_src_lo = float(neighbors["AvgRating"].quantile(0.25))
-                #     r_src_hi = float(neighbors["AvgRating"].quantile(0.75))
-                #     o_src_lo = float(neighbors["Owned Users"].quantile(0.25))
-                #     o_src_hi = float(neighbors["Owned Users"].quantile(0.90))
-                # else:
-                #     # If neighbors are thin, assume your observed behavior (5.5–6.5 ratings, few hundred owners)
-                #     r_src_lo, r_src_hi = 5.5, 6.5
-                #     o_src_lo, o_src_hi = 200.0, 3000.0
-                
-                # # Target bands 
-                # r_dst_lo, r_dst_hi = 6.0, 8.0
-                # o_dst_lo, o_dst_hi = 500.0, 20000.0
-                
-                # # Map predicted_rating and owners into those bands (with clamps)
-                # predicted_rating = _interp(predicted_rating, r_src_lo, r_src_hi, r_dst_lo, r_dst_hi)
-                # predicted_rating = float(np.clip(predicted_rating, 5.0, 9.2))  # hard safety clamp
-                
-                # predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
-                
-                # # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
-                # owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
-                # predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.4
-    
-    ###################end stand in block ####################################
+            
                # === Compute predictions (prefer trained models; fallback to nearest neighbors) ===
                 predicted_rating = None
                 predicted_owners = None
@@ -2322,8 +2191,9 @@ with tab_wizard:
                     )
                     
                     st.plotly_chart(fig_trajectory, use_container_width=True)
+    
 except Exception as e:
-        _self_heal_reset_and_rerun("ANALYZE", e)            
+    _self_heal_reset_and_rerun("ANALYZE", e)            
 # Trend Analysis Tab
 with tab_trends:
     st.markdown("## 📈 Market Trend Analysis")
@@ -2810,6 +2680,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
