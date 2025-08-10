@@ -1374,7 +1374,7 @@ with tab_intel:
 
 # Design Wizard Tab  
 with tab_wizard:
-    st.markdown("## 🧙‍♂️ AI-Powered Game Design Wizard")
+    st.markdown("## 🧙‍♂️ Game Design Wizard 🧙🏾‍♂️")
     st.markdown("*Build your concept and receive market-validated predictions and recommendations*")
     
     # Archetype selection with insights
@@ -1641,7 +1641,7 @@ with tab_wizard:
             )
             
             ########## Pricing & Unit Economics ##########
-            st.markdown("### 💵 Pricing & Unit Economics")
+            st.markdown("### 💵 Economics and pricing 💵")
             
             # Use inputs captured in the form
             msrp = float(target_price)
@@ -2650,6 +2650,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
