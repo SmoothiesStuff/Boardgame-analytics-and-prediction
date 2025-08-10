@@ -1776,8 +1776,8 @@ with tab_wizard:
                 w = 1.0 / (1e-9 + neighbors_sorted["__dist"].astype(float))
                 w = w / w.sum()
             
-                predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))
-                predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))
+                predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))*1.15
+                predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))*20
 
             
           
@@ -2865,6 +2865,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
