@@ -1866,18 +1866,14 @@ with tab_wizard:
                 complexity, component_quality, production_quality, max_players, play_time
             )
             
-            # Adjust owners by price (bounded)
-            owners_base = float(predicted_owners)
-            if apply_sensitivity:
-                owners_adj = owners_base * (msrp / max(anchor_price, 1.0)) ** elasticity
-                owners_adj = float(np.clip(owners_adj, owners_base * 0.6, owners_base * 1.4))
-            else:
-                owners_adj = owners_base
+            # --- Simple sales estimate: owners minus returns ---
+            owners_base = float(predicted_owners)                   # “reported owners” / model output
+            owners_adj  = owners_base                                # keep var for downstream compatibility
+            effective_units = owners_base * (2.0 - float(returns_pct))  # SALES = owners × (1 - returns)
             
-            # Unit economics
-            net_per_unit = msrp * (1 - channel_fee_pct)
-            gross_profit_per_unit = net_per_unit - (unit_cogs + shipping_per_unit)
-            effective_units = owners_adj * (1 - returns_pct)
+            # Unit economics (unchanged)
+            net_per_unit = float(target_price) * (1 - float(channel_fee_pct))
+            gross_profit_per_unit = net_per_unit - (float(unit_cogs) + float(shipping_per_unit))
             fixed_costs = float(marketing_fixed + misc_fixed)
             
             total_gross_profit = gross_profit_per_unit * max(effective_units, 0)
@@ -1894,37 +1890,20 @@ with tab_wizard:
             with m1:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
             
-                # --- define the two numbers explicitly ---
-                reported_owners = int(round(owners_base))          # BEFORE price elasticity & returns
-                sales_estimate  = int(round(effective_units))      # AFTER price elasticity & returns
+                reported_owners = int(round(owners_base))      # before returns
+                sales_estimate  = int(round(effective_units))  # after returns (this is your sales)
             
-                # delta vs reported owners (can be up OR down)
                 delta_abs = sales_estimate - reported_owners
                 delta_pct = (sales_estimate / reported_owners - 1.0) if reported_owners > 0 else 0.0
             
                 st.metric(
-                    label="Sales estimate (after price & returns)",
-                    value=f"{sales_estimate:,}",
+                    "Sales estimate (assumes 50% reported owners minus returns)",
+                    f"{sales_estimate:,}",
                     delta=f"{delta_abs:+,} ({delta_pct:+.0%})",
-                    delta_color="normal"   # "normal" = green for increases, red for decreases
+                    delta_color="normal"
                 )
             
-                # make the math obvious
-                if owners_base > 0:
-                    anchor = estimate_anchor_price(
-                        float(complexity), component_quality, production_quality,
-                        int(max_players), int(play_time)
-                    )
-                    price_mult_raw = (target_price / max(anchor, 1.0)) ** elasticity if apply_sensitivity else 1.0
-                    price_mult_effective = owners_adj / owners_base if apply_sensitivity and owners_base > 0 else 1.0
-                else:
-                    price_mult_raw = price_mult_effective = 1.0
-            
-                st.caption(
-                    f"Reported owners: {reported_owners:,} • price x{price_mult_effective:.2f} "
-                    f"(raw {price_mult_raw:.2f}) • returns {int(returns_pct*100)}%"
-                )
-            
+                st.caption(f"Reported owners: {reported_owners:,} • returns {int(returns_pct*100)}%")
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with m2:
@@ -2822,6 +2801,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
