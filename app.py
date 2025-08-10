@@ -971,19 +971,19 @@ st.sidebar.markdown("---")
 df = load_df(None)  # or just load_df() if you set a default arg
 
 # Advanced filtering controls
-st.sidebar.markdown("### 🎯 Analysis Parameters")
-k = st.sidebar.slider("Cluster Granularity", 2, 20, 10, 
+st.sidebar.markdown("### Analysis Parameters")
+k = st.sidebar.slider("# of Clusters", 2, 20, 10, 
                       help="Higher values create more specific market segments")
-topn = st.sidebar.slider("Comparison Pool Size", 5, 50, 15,
+topn = st.sidebar.slider("Comparison Pool Size", 5, 50, 20,
                          help="Number of similar games to analyze")
 
-st.sidebar.markdown("### 🔍 Market Filters")
+st.sidebar.markdown("### Market Filters ")
 year_col = "Year Published"
 min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
 display_min_year = max(1900, min_year)
 
 yr_rng = st.sidebar.slider(
-    "📅 Year Range", 
+    "📅 Year Range 📅", 
     display_min_year, max_year, 
     (max(1990, display_min_year), max_year),
     help="Focus on specific time periods"
@@ -992,7 +992,7 @@ yr_rng = st.sidebar.slider(
 weight_col = "GameWeight"
 min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
 wt_rng = st.sidebar.slider(
-    "🧩 Complexity Range", 
+    "🧩 Complexity Range 🧩", 
     1.0, 5.0, 
     (1.5, 4.0),
     step=0.1,
@@ -1000,7 +1000,7 @@ wt_rng = st.sidebar.slider(
 )
 
 pt_rng_hrs = st.sidebar.slider(
-    "⏱️ Play Time (hours)", 
+    "⏱️ Play Time (hours) ⏱️", 
     0.25, 6.0, 
     (0.5, 3.0), 
     step=0.25,
@@ -1015,14 +1015,14 @@ pl_min, pl_max = st.sidebar.slider(
 )
 
 age_rng = st.sidebar.slider(
-    "👶 Age Range", 
+    "👶 Age Range 👴", 
     3, 18, 
     (8, 14),
     help="Minimum age requirements"
 )
 
 # Mechanic and theme filtering
-with st.sidebar.expander("🎲 Mechanics & Themes", expanded=False):
+with st.sidebar.expander("🎲 Mechanics & Themes 🎲", expanded=False):
     mech_cols = [c for c in df.columns if c.startswith("Mechanic_") or c in [
         "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
         "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers"
@@ -1532,7 +1532,7 @@ with tab_wizard:
             
             # Generate predictions
             st.markdown("---")
-            st.markdown("## 🎯 Design Analysis Results")
+            st.markdown("## 👨🏾‍🔬 Design Analysis Results")
             
             # AI Predictions section
             st.markdown("### 🤖 AI Performance Predictions")
@@ -1738,7 +1738,7 @@ with tab_wizard:
             """)
 
             ########## design analysis visuals ##########
-            st.markdown("### 🎨 Visuals")
+            st.markdown("### Your Game and It's Cluster")
             
             # A) Rating vs Complexity (your design highlighted)
             fig_a = go.Figure()
@@ -1755,10 +1755,17 @@ with tab_wizard:
             ))
             
             # segment highlight
+            # segment highlight (ORANGE)
             fig_a.add_trace(go.Scatter(
                 x=seg["GameWeight"], y=seg["AvgRating"],
-                mode="markers", name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
-                marker=dict(size=7, opacity=0.7),
+                mode="markers",
+                name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                marker=dict(
+                    size=8,
+                    opacity=0.85,
+                    color=SECONDARY,                     # 🔶 make segment dots orange
+                    line=dict(width=1, color="rgba(0,0,0,0.25)")
+                ),
                 text=seg.get("Name", None),
                 hovertemplate="<b>%{text}</b><br>Weight: %{x:.2f}<br>Rating: %{y:.2f}<extra></extra>"
             ))
@@ -1790,13 +1797,21 @@ with tab_wizard:
                 hoverinfo="skip"
             ))
             
+            # segment highlight (ORANGE)
             fig_b.add_trace(go.Scatter(
                 x=seg["AvgRating"], y=seg["Owned Users"],
-                mode="markers", name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
-                marker=dict(size=7, opacity=0.7),
+                mode="markers",
+                name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                marker=dict(
+                    size=8,
+                    opacity=0.85,
+                    color=SECONDARY,                     # 🔶 make segment dots orange
+                    line=dict(width=1, color="rgba(0,0,0,0.25)")
+                ),
                 text=seg.get("Name", None),
                 hovertemplate="<b>%{text}</b><br>Rating: %{x:.2f}<br>Owners: %{y:,}<extra></extra>"
             ))
+
             
             fig_b.add_trace(go.Scatter(
                 x=[predicted_rating], y=[predicted_owners],
@@ -1826,13 +1841,21 @@ with tab_wizard:
                 hoverinfo="skip"
             ))
             
+            # segment highlight (ORANGE)
             fig_c.add_trace(go.Scatter(
                 x=seg["Year Published"], y=seg["AvgRating"],
-                mode="markers", name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
-                marker=dict(size=7, opacity=0.75),
+                mode="markers",
+                name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                marker=dict(
+                    size=8,
+                    opacity=0.85,
+                    color=SECONDARY,                     # 🔶 make segment dots orange
+                    line=dict(width=1, color="rgba(0,0,0,0.25)")
+                ),
                 text=seg.get("Name", None),
                 hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>"
             ))
+
             
             fig_c.add_trace(go.Scatter(
                 x=[year_published], y=[predicted_rating],
@@ -2627,6 +2650,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
