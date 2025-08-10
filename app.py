@@ -993,6 +993,19 @@ def load_models(paths: Dict[str, str]):
             pass
     
     return models
+# ========= SAFETY: self-heal helpers (add below load_models, above "Main UI starts here") =========
+def _self_heal_reset_and_rerun(stage: str, err: Exception):
+    st.warning(f"Recovered from a {stage} error: {type(err).__name__}: {err}")
+    # Clear caches + session so bad state can’t persist, then rerun
+    try:
+        st.cache_data.clear()
+        st.cache_resource.clear()
+    except Exception:
+        pass
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+    st.experimental_rerun()
+# ================================================================================================
 
 # Main UI starts here
 st.markdown('<div class="main-header">', unsafe_allow_html=True)
@@ -1004,136 +1017,138 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Sidebar with enhanced controls
 st.sidebar.title("🎮 Control Panel")
 st.sidebar.markdown("---")
-
-# Always load from the default dataset paths (no upload control)
-df = load_df(None)  # or just load_df() if you set a default arg
-
-# Advanced filtering controls
-st.sidebar.markdown("### Analysis Parameters")
-k = st.sidebar.slider("# of Clusters", 2, 20, 10, 
-                      help="Higher values create more specific market segments")
-topn = st.sidebar.slider("Comparison Pool Size", 5, 50, 20,
-                         help="Number of similar games to analyze")
-
-st.sidebar.markdown("### Market Filters ")
-year_col = "Year Published"
-min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
-display_min_year = max(1900, min_year)
-
-yr_rng = st.sidebar.slider(
-    "📅 Year Range 📅", 
-    display_min_year, max_year, 
-    (max(1950, display_min_year), max_year),
-    help="Focus on specific time periods"
-)
-
-weight_col = "GameWeight"
-min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
-wt_rng = st.sidebar.slider(
-    "🧩 Complexity Range 🧩", 
-    1.0, 5.0, 
-    (1.5, 4.0),
-    step=0.1,
-    help="1=Very Simple, 5=Very Complex"
-)
-
-pt_rng_hrs = st.sidebar.slider(
-    "⏱️ Play Time (hours) ⏱️", 
-    0.25, 6.0, 
-    (0.5, 3.0), 
-    step=0.25,
-    help="Target game duration"
-)
-
-pl_min, pl_max = st.sidebar.slider(
-    "👥 Player Count Range", 
-    1, 12,
-    (2, 6),
-    help="Supported player counts"
-)
-
-age_rng = st.sidebar.slider(
-    "👶 Age Range 👴", 
-    3, 18, 
-    (8, 14),
-    help="Minimum age requirements"
-)
-
-# Mechanic and theme filtering
-with st.sidebar.expander("🎲 Mechanics & Themes 🎲", expanded=False):
-    mech_cols = [c for c in df.columns if c.startswith("Mechanic_") or c in [
-        "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
-        "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers"
-    ]]
-    theme_cols = [c for c in df.columns if c.startswith("Cat:") or c in [
-        "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"
-    ]]
+try:
+    # Always load from the default dataset paths (no upload control)
+    df = load_df(None)  # or just load_df() if you set a default arg
     
-    mech_match_mode = st.radio("Mechanic Match", ["Any", "All"], horizontal=True)
-    selected_mechs = st.multiselect("Select Mechanics", mech_cols[:30], default=[])
+    # Advanced filtering controls
+    st.sidebar.markdown("### Analysis Parameters")
+    k = st.sidebar.slider("# of Clusters", 2, 20, 10, 
+                          help="Higher values create more specific market segments")
+    topn = st.sidebar.slider("Comparison Pool Size", 5, 50, 20,
+                             help="Number of similar games to analyze")
     
-    theme_match_mode = st.radio("Theme Match", ["Any", "All"], horizontal=True)
-    selected_themes = st.multiselect("Select Themes", theme_cols[:20], default=[])
-
-st.sidebar.markdown("---")
-st.sidebar.caption("💡 **Tip:** Use filters to focus on your target market segment for more accurate insights")
-########## narrative toggle + helper ##########
-st.sidebar.markdown("### 📝 Narrative")
-st.sidebar.checkbox("Show narrative insights", True, key="show_narrative")
-
-def narr(md: str):
-    if st.session_state.get("show_narrative", True):
-        bl = "> " + md.strip().replace("\n", "\n> ")
-        st.markdown(bl)
-
-# Convert play time range to minutes
-pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
-
-# Prepare data and clustering
-X_all, meta = split_features(df)
-for _c in ("NumWish","NumWant"):
-    if _c in X_all.columns:
-        X_all = X_all.drop(columns=[_c])   #don't predict off theses
-scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
-
-# Add derived features
-df["Play Time Hours"] = df["Play Time"] / 60.0
-df["Play Time Hours"] = df["Play Time Hours"].clip(upper=10)
-df["Success Score"] = (df["AvgRating"] - 5) * df["Owned Users"] / 1000
-df["Market Penetration"] = df["Owned Users"] / df["Owned Users"].max()
-
-view = df.copy()
-view["Cluster"] = labels
-view["PCA1"] = coords[:, 0]
-view["PCA2"] = coords[:, 1]
-
-# Apply filters
-mask = pd.Series(True, index=view.index)
-mask &= view[year_col].between(yr_rng[0], yr_rng[1])
-mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
-mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])
-
-if all(col in view.columns for col in ["Min Players", "Max Players"]):
-    mask &= (view["Max Players"] >= pl_min) & (view["Min Players"] <= pl_max)
-
-if "Min Age" in view.columns:
-    mask &= view["Min Age"].between(age_rng[0], age_rng[1])
-
-# Apply mechanic filters
-if selected_mechs:
-    mech_masks = [view[m] == 1 for m in selected_mechs if m in view.columns]
-    if mech_masks:
-        mech_combined = pd.concat(mech_masks, axis=1)
-        mask &= mech_combined.any(axis=1) if mech_match_mode == "Any" else mech_combined.all(axis=1)
-
-# Apply theme filters  
-if selected_themes:
-    theme_masks = [view[t] == 1 for t in selected_themes if t in view.columns]
-    if theme_masks:
-        theme_combined = pd.concat(theme_masks, axis=1)
-        mask &= theme_combined.any(axis=1) if theme_match_mode == "Any" else theme_combined.all(axis=1)
-
-view_f = view[mask].copy()
+    st.sidebar.markdown("### Market Filters ")
+    year_col = "Year Published"
+    min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
+    display_min_year = max(1900, min_year)
+    
+    yr_rng = st.sidebar.slider(
+        "📅 Year Range 📅", 
+        display_min_year, max_year, 
+        (max(1950, display_min_year), max_year),
+        help="Focus on specific time periods"
+    )
+    
+    weight_col = "GameWeight"
+    min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
+    wt_rng = st.sidebar.slider(
+        "🧩 Complexity Range 🧩", 
+        1.0, 5.0, 
+        (1.5, 4.0),
+        step=0.1,
+        help="1=Very Simple, 5=Very Complex"
+    )
+    
+    pt_rng_hrs = st.sidebar.slider(
+        "⏱️ Play Time (hours) ⏱️", 
+        0.25, 6.0, 
+        (0.5, 3.0), 
+        step=0.25,
+        help="Target game duration"
+    )
+    
+    pl_min, pl_max = st.sidebar.slider(
+        "👥 Player Count Range", 
+        1, 12,
+        (2, 6),
+        help="Supported player counts"
+    )
+    
+    age_rng = st.sidebar.slider(
+        "👶 Age Range 👴", 
+        3, 18, 
+        (8, 14),
+        help="Minimum age requirements"
+    )
+    
+    # Mechanic and theme filtering
+    with st.sidebar.expander("🎲 Mechanics & Themes 🎲", expanded=False):
+        mech_cols = [c for c in df.columns if c.startswith("Mechanic_") or c in [
+            "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
+            "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers"
+        ]]
+        theme_cols = [c for c in df.columns if c.startswith("Cat:") or c in [
+            "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"
+        ]]
+        
+        mech_match_mode = st.radio("Mechanic Match", ["Any", "All"], horizontal=True)
+        selected_mechs = st.multiselect("Select Mechanics", mech_cols[:30], default=[])
+        
+        theme_match_mode = st.radio("Theme Match", ["Any", "All"], horizontal=True)
+        selected_themes = st.multiselect("Select Themes", theme_cols[:20], default=[])
+    
+    st.sidebar.markdown("---")
+    st.sidebar.caption("💡 **Tip:** Use filters to focus on your target market segment for more accurate insights")
+    ########## narrative toggle + helper ##########
+    st.sidebar.markdown("### 📝 Narrative")
+    st.sidebar.checkbox("Show narrative insights", True, key="show_narrative")
+    
+    def narr(md: str):
+        if st.session_state.get("show_narrative", True):
+            bl = "> " + md.strip().replace("\n", "\n> ")
+            st.markdown(bl)
+    
+    # Convert play time range to minutes
+    pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
+    
+    # Prepare data and clustering
+    X_all, meta = split_features(df)
+    for _c in ("NumWish","NumWant"):
+        if _c in X_all.columns:
+            X_all = X_all.drop(columns=[_c])   #don't predict off theses
+    scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
+    
+    # Add derived features
+    df["Play Time Hours"] = df["Play Time"] / 60.0
+    df["Play Time Hours"] = df["Play Time Hours"].clip(upper=10)
+    df["Success Score"] = (df["AvgRating"] - 5) * df["Owned Users"] / 1000
+    df["Market Penetration"] = df["Owned Users"] / df["Owned Users"].max()
+    
+    view = df.copy()
+    view["Cluster"] = labels
+    view["PCA1"] = coords[:, 0]
+    view["PCA2"] = coords[:, 1]
+    
+    # Apply filters
+    mask = pd.Series(True, index=view.index)
+    mask &= view[year_col].between(yr_rng[0], yr_rng[1])
+    mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
+    mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])
+    
+    if all(col in view.columns for col in ["Min Players", "Max Players"]):
+        mask &= (view["Max Players"] >= pl_min) & (view["Min Players"] <= pl_max)
+    
+    if "Min Age" in view.columns:
+        mask &= view["Min Age"].between(age_rng[0], age_rng[1])
+    
+    # Apply mechanic filters
+    if selected_mechs:
+        mech_masks = [view[m] == 1 for m in selected_mechs if m in view.columns]
+        if mech_masks:
+            mech_combined = pd.concat(mech_masks, axis=1)
+            mask &= mech_combined.any(axis=1) if mech_match_mode == "Any" else mech_combined.all(axis=1)
+    
+    # Apply theme filters  
+    if selected_themes:
+        theme_masks = [view[t] == 1 for t in selected_themes if t in view.columns]
+        if theme_masks:
+            theme_combined = pd.concat(theme_masks, axis=1)
+            mask &= theme_combined.any(axis=1) if theme_match_mode == "Any" else theme_combined.all(axis=1)
+    
+    view_f = view[mask].copy()
+except Exception as e:
+    _self_heal_reset_and_rerun("DATA/CLUSTER", e)
 ########## build labels for visible (filtered) data ##########
 cluster_labels = generate_cluster_labels(view_f)
 if view_f.empty:
@@ -1523,790 +1538,792 @@ with tab_wizard:
     
         # >>> Submit button must be inside the form <<<
         analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", type="primary", use_container_width=True)
-    
-    if analyze_button:
-        # Build comprehensive profile
-        profile = {
-            "Year Published": year_published,
-            "Min Players": min_players,
-            "Max Players": max_players,
-            "Play Time": play_time,
-            "Min Age": min_age,
-            "GameWeight": complexity,
-            "Kickstarted": 1 if kickstarted != "Traditional" else 0,
-        }
+    try:
         
-        # Add mechanics and themes
-        # Solo Mode → force Min Players = 1 (model-safe)
-        if solo_mode:
-            profile["Min Players"] = 1
-        
-        # Co-op toggle → map to real column if present
-        toggle_feature(profile, X_all.columns, coop_toggle, "Cooperative Game")
-        
-        # Mechanics toggles (exact column names from grid)
-        for m in selected_mechanics:
-            profile[m] = 1
-        
-        # Themes toggles (exact column names from grid)
-        for t in selected_themes:
-            profile[t] = 1
-        
-        
-        # Prepare input for clustering
-        x_input = pd.DataFrame([{c: profile.get(c, 0) for c in X_all.columns}])
-        x_scaled = scaler.transform(x_input)
-        cluster_id = int(kmeans.predict(x_scaled)[0])
-        
-        # Find similar games
-        cluster_games = view_f[view_f["Cluster"] == cluster_id]
-        
-        if len(cluster_games) > 0:
-            # Calculate distances for nearest neighbors
-            X_cluster = X_all.loc[cluster_games.index]
-            X_cluster_scaled = scaler.transform(X_cluster)
-            distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
-            cluster_games = cluster_games.copy()
-            cluster_games["__dist"] = distances
-            neighbors = cluster_games.nsmallest(min(topn, len(cluster_games)), "__dist")
+        if analyze_button:
+            # Build comprehensive profile
+            profile = {
+                "Year Published": year_published,
+                "Min Players": min_players,
+                "Max Players": max_players,
+                "Play Time": play_time,
+                "Min Age": min_age,
+                "GameWeight": complexity,
+                "Kickstarted": 1 if kickstarted != "Traditional" else 0,
+            }
             
-            # Generate predictions
-            st.markdown("---")
-            st.markdown("## 👨🏾‍🔬 Design Analysis Results")
+            # Add mechanics and themes
+            # Solo Mode → force Min Players = 1 (model-safe)
+            if solo_mode:
+                profile["Min Players"] = 1
             
-            # AI Predictions section
-            st.markdown("### 🤖 AI Performance Predictions")
-            # --- Predictions & Rendering (robust to missing models) ---
-            FEATURE_COLS_PATH = "models/feature_cols.json"  # define this once
+            # Co-op toggle → map to real column if present
+            toggle_feature(profile, X_all.columns, coop_toggle, "Cooperative Game")
             
-            models = load_models(MODEL_PATHS)
-            use_models = any(k in models for k in ("rating_xgb", "owned_rf", "owned_xgb"))
+            # Mechanics toggles (exact column names from grid)
+            for m in selected_mechanics:
+                profile[m] = 1
             
-            # Guard: if the currently selected cluster has no games (due to tight filters),
-            # fall back to nearest neighbors across ALL filtered games.
-            if len(cluster_games) == 0:
-                st.warning("No games in the selected segment under current filters. Falling back to all filtered games.")
-                X_cluster = X_all.loc[view_f.index]
-                X_cluster_scaled = scaler.transform(X_cluster)
-                distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
-                tmp = view_f.copy()
-                tmp["__dist"] = distances
-                neighbors = tmp.nsmallest(min(topn, len(tmp)), "__dist")
-            else:
-                # Normal neighbor selection within the predicted cluster
+            # Themes toggles (exact column names from grid)
+            for t in selected_themes:
+                profile[t] = 1
+            
+            
+            # Prepare input for clustering
+            x_input = pd.DataFrame([{c: profile.get(c, 0) for c in X_all.columns}])
+            x_scaled = scaler.transform(x_input)
+            cluster_id = int(kmeans.predict(x_scaled)[0])
+            
+            # Find similar games
+            cluster_games = view_f[view_f["Cluster"] == cluster_id]
+            
+            if len(cluster_games) > 0:
+                # Calculate distances for nearest neighbors
                 X_cluster = X_all.loc[cluster_games.index]
                 X_cluster_scaled = scaler.transform(X_cluster)
                 distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
                 cluster_games = cluster_games.copy()
                 cluster_games["__dist"] = distances
                 neighbors = cluster_games.nsmallest(min(topn, len(cluster_games)), "__dist")
-            
-            if len(neighbors) == 0:
-                st.error("Couldn’t find similar games to compare against. Loosen filters and try again.")
-                st.stop()
-            
-            # === Compute predictions (models if available, otherwise neighbor fallback) ===
-            if use_models:
-                scaler_in = models.get("_input_scaler")
-                training_cols = None
-            
-                # 1) Try to load saved feature ordering from JSON
-                try:
-                    if os.path.exists(FEATURE_COLS_PATH):
-                        import json
-                        with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
-                            training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
-                except Exception:
+                
+                # Generate predictions
+                st.markdown("---")
+                st.markdown("## 👨🏾‍🔬 Design Analysis Results")
+                
+                # AI Predictions section
+                st.markdown("### 🤖 AI Performance Predictions")
+                # --- Predictions & Rendering (robust to missing models) ---
+                FEATURE_COLS_PATH = "models/feature_cols.json"  # define this once
+                
+                models = load_models(MODEL_PATHS)
+                use_models = any(k in models for k in ("rating_xgb", "owned_rf", "owned_xgb"))
+                
+                # Guard: if the currently selected cluster has no games (due to tight filters),
+                # fall back to nearest neighbors across ALL filtered games.
+                if len(cluster_games) == 0:
+                    st.warning("No games in the selected segment under current filters. Falling back to all filtered games.")
+                    X_cluster = X_all.loc[view_f.index]
+                    X_cluster_scaled = scaler.transform(X_cluster)
+                    distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
+                    tmp = view_f.copy()
+                    tmp["__dist"] = distances
+                    neighbors = tmp.nsmallest(min(topn, len(tmp)), "__dist")
+                else:
+                    # Normal neighbor selection within the predicted cluster
+                    X_cluster = X_all.loc[cluster_games.index]
+                    X_cluster_scaled = scaler.transform(X_cluster)
+                    distances = pairwise_distances(x_scaled, X_cluster_scaled)[0]
+                    cluster_games = cluster_games.copy()
+                    cluster_games["__dist"] = distances
+                    neighbors = cluster_games.nsmallest(min(topn, len(cluster_games)), "__dist")
+                
+                if len(neighbors) == 0:
+                    st.error("Couldn’t find similar games to compare against. Loosen filters and try again.")
+                    st.stop()
+                
+                # === Compute predictions (models if available, otherwise neighbor fallback) ===
+                if use_models:
+                    scaler_in = models.get("_input_scaler")
                     training_cols = None
-            
-                # 2) Else use scaler’s or model’s feature names
-                if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
-                    training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
-                if training_cols is None:
-                    for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
-                        mdl = models.get(_k)
-                        if mdl is not None and hasattr(mdl, "feature_names_in_"):
-                            training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
-                            break
-                if training_cols is None:
-                    training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
-            
-                # 3) Align, optional scale, predict
-                X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
-                X_in = X_pred_raw
-                if scaler_in is not None:
+                
+                    # 1) Try to load saved feature ordering from JSON
                     try:
-                        X_scaled_cols = scaler_in.transform(X_pred_raw.values)
-                        X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
+                        if os.path.exists(FEATURE_COLS_PATH):
+                            import json
+                            with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
+                                training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
                     except Exception:
-                        X_in = X_pred_raw
-            
-                rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
-                if rating_model is not None:
-                    try:
-                        predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))
-                    except Exception:
+                        training_cols = None
+                
+                    # 2) Else use scaler’s or model’s feature names
+                    if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
+                        training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
+                    if training_cols is None:
+                        for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
+                            mdl = models.get(_k)
+                            if mdl is not None and hasattr(mdl, "feature_names_in_"):
+                                training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
+                                break
+                    if training_cols is None:
+                        training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
+                
+                    # 3) Align, optional scale, predict
+                    X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
+                    X_in = X_pred_raw
+                    if scaler_in is not None:
+                        try:
+                            X_scaled_cols = scaler_in.transform(X_pred_raw.values)
+                            X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
+                        except Exception:
+                            X_in = X_pred_raw
+                
+                    rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
+                    if rating_model is not None:
+                        try:
+                            predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))
+                        except Exception:
+                            predicted_rating = float(neighbors["AvgRating"].mean())
+                    else:
                         predicted_rating = float(neighbors["AvgRating"].mean())
-                else:
-                    predicted_rating = float(neighbors["AvgRating"].mean())
-            
-                owners_model = models.get("owned_rf") or models.get("owned_xgb")
-                if owners_model is not None:
-                    try:
-                        owners_val = _predict_agnostic(owners_model, X_in, training_cols)
-                        predicted_owners = int(max(0, owners_val))
-                    except Exception:
+                
+                    owners_model = models.get("owned_rf") or models.get("owned_xgb")
+                    if owners_model is not None:
+                        try:
+                            owners_val = _predict_agnostic(owners_model, X_in, training_cols)
+                            predicted_owners = int(max(0, owners_val))
+                        except Exception:
+                            predicted_owners = int(neighbors["Owned Users"].median())
+                    else:
                         predicted_owners = int(neighbors["Owned Users"].median())
+                
                 else:
-                    predicted_owners = int(neighbors["Owned Users"].median())
-            
-            else:
-                # --- Fallback using neighbors ---
-                # Deterministic, distance-weighted fallback (no randomness)
-                neighbors = neighbors.sort_values(
-                    ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
-                ).head(min(topn, len(neighbors)))
+                    # --- Fallback using neighbors ---
+                    # Deterministic, distance-weighted fallback (no randomness)
+                    neighbors = neighbors.sort_values(
+                        ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
+                    ).head(min(topn, len(neighbors)))
+                    
+                    w = 1.0 / (1e-9 + neighbors["__dist"].astype(float))
+                    w = w / w.sum()
+                    
+                    predicted_rating = float(np.clip((neighbors["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))
+                    predicted_owners = int(max(0, (neighbors["Owned Users"].astype(float) * w).sum()))
+                    
+                ########## soft calibration (quick testing only) ##########
+                # stand in for low results because of empty vectors above. use nearest neghbors, boost ownership for good ratings
+                # def _interp(x, a, b, c, d):
+                #     # linear map [a,b] -> [c,d] with clamping
+                #     if b <= a: 
+                #         return float(np.clip((c + d) / 2.0, c, d))
+                #     t = (x - a) / (b - a)
+                #     return float(c + np.clip(t, 0.0, 1.0) * (d - c))
                 
-                w = 1.0 / (1e-9 + neighbors["__dist"].astype(float))
-                w = w / w.sum()
+                # # Use neighbor distribution to set source ranges; fallback to sensible defaults
+                # if len(neighbors) >= 5:
+                #     r_src_lo = float(neighbors["AvgRating"].quantile(0.25))
+                #     r_src_hi = float(neighbors["AvgRating"].quantile(0.75))
+                #     o_src_lo = float(neighbors["Owned Users"].quantile(0.25))
+                #     o_src_hi = float(neighbors["Owned Users"].quantile(0.90))
+                # else:
+                #     # If neighbors are thin, assume your observed behavior (5.5–6.5 ratings, few hundred owners)
+                #     r_src_lo, r_src_hi = 5.5, 6.5
+                #     o_src_lo, o_src_hi = 200.0, 3000.0
                 
-                predicted_rating = float(np.clip((neighbors["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))
-                predicted_owners = int(max(0, (neighbors["Owned Users"].astype(float) * w).sum()))
+                # # Target bands 
+                # r_dst_lo, r_dst_hi = 6.0, 8.0
+                # o_dst_lo, o_dst_hi = 500.0, 20000.0
                 
-            ########## soft calibration (quick testing only) ##########
-            # stand in for low results because of empty vectors above. use nearest neghbors, boost ownership for good ratings
-            # def _interp(x, a, b, c, d):
-            #     # linear map [a,b] -> [c,d] with clamping
-            #     if b <= a: 
-            #         return float(np.clip((c + d) / 2.0, c, d))
-            #     t = (x - a) / (b - a)
-            #     return float(c + np.clip(t, 0.0, 1.0) * (d - c))
-            
-            # # Use neighbor distribution to set source ranges; fallback to sensible defaults
-            # if len(neighbors) >= 5:
-            #     r_src_lo = float(neighbors["AvgRating"].quantile(0.25))
-            #     r_src_hi = float(neighbors["AvgRating"].quantile(0.75))
-            #     o_src_lo = float(neighbors["Owned Users"].quantile(0.25))
-            #     o_src_hi = float(neighbors["Owned Users"].quantile(0.90))
-            # else:
-            #     # If neighbors are thin, assume your observed behavior (5.5–6.5 ratings, few hundred owners)
-            #     r_src_lo, r_src_hi = 5.5, 6.5
-            #     o_src_lo, o_src_hi = 200.0, 3000.0
-            
-            # # Target bands 
-            # r_dst_lo, r_dst_hi = 6.0, 8.0
-            # o_dst_lo, o_dst_hi = 500.0, 20000.0
-            
-            # # Map predicted_rating and owners into those bands (with clamps)
-            # predicted_rating = _interp(predicted_rating, r_src_lo, r_src_hi, r_dst_lo, r_dst_hi)
-            # predicted_rating = float(np.clip(predicted_rating, 5.0, 9.2))  # hard safety clamp
-            
-            # predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
-            
-            # # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
-            # owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
-            # predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.4
-
-###################end stand in block ####################################
-           # === Compute predictions (prefer trained models; fallback to nearest neighbors) ===
-            predicted_rating = None
-            predicted_owners = None
-            
-            try:
-                # 0) Models already loaded above:
-                # models = load_models(MODEL_PATHS)
-            
-                # 1) Resolve training feature order
-                scaler_in = models.get("_input_scaler")
-                training_cols = None
-                FEATURE_COLS_PATH = "models/feature_cols.json"
-            
-                # 1a) JSON list (preferred)
+                # # Map predicted_rating and owners into those bands (with clamps)
+                # predicted_rating = _interp(predicted_rating, r_src_lo, r_src_hi, r_dst_lo, r_dst_hi)
+                # predicted_rating = float(np.clip(predicted_rating, 5.0, 9.2))  # hard safety clamp
+                
+                # predicted_owners = _interp(float(predicted_owners), o_src_lo, o_src_hi, o_dst_lo, o_dst_hi)
+                
+                # # Small bonus: let higher ratings nudge owners a bit (keeps things consistent)
+                # owners_rating_factor = _interp(predicted_rating, r_dst_lo, r_dst_hi, 0.9, 1.15)
+                # predicted_owners = int(np.round(np.clip(predicted_owners * owners_rating_factor, 100, 50000)))*0.4
+    
+    ###################end stand in block ####################################
+               # === Compute predictions (prefer trained models; fallback to nearest neighbors) ===
+                predicted_rating = None
+                predicted_owners = None
+                
                 try:
-                    if os.path.exists(FEATURE_COLS_PATH):
-                        with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
-                            training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
-                except Exception:
+                    # 0) Models already loaded above:
+                    # models = load_models(MODEL_PATHS)
+                
+                    # 1) Resolve training feature order
+                    scaler_in = models.get("_input_scaler")
                     training_cols = None
-            
-                # 1b) Scaler feature names
-                if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
-                    training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
-            
-                # 1c) Model feature names
-                if training_cols is None:
-                    for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
-                        mdl = models.get(_k)
-                        if mdl is not None and hasattr(mdl, "feature_names_in_"):
-                            training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
-                            break
-            
-                # 1d) Fall back to current X_all
-                if training_cols is None:
-                    training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
-            
-                # 2) Align and optionally scale
-                X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
-                X_in = X_pred_raw
-                if scaler_in is not None:
+                    FEATURE_COLS_PATH = "models/feature_cols.json"
+                
+                    # 1a) JSON list (preferred)
                     try:
-                        X_scaled_cols = scaler_in.transform(X_pred_raw.values)
-                        X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
+                        if os.path.exists(FEATURE_COLS_PATH):
+                            with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
+                                training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
                     except Exception:
-                        X_in = X_pred_raw
-            
-                # 3) Get models; require both
-                rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
-                owners_model = models.get("owned_rf") or models.get("owned_xgb")
-                if rating_model is None or owners_model is None:
-                    raise RuntimeError("Missing rating and/or owners model")
-            
-                # 4) Predict (raw model outputs; no heuristic remaps)
-                predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))*1.1
-                owners_val = float(_predict_agnostic(owners_model, X_in, training_cols))
-                predicted_owners = int(max(0, round(owners_val)))*15
-            
-            except Exception as e:
-                # Neighbor fallback (kept intact)
-                # st.warning(f"Model prediction unavailable, using nearest-neighbor fallback: {e}")
-                neighbors_sorted = neighbors.sort_values(
-                    ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
-                ).head(min(topn, len(neighbors)))
-            
-                w = 1.0 / (1e-9 + neighbors_sorted["__dist"].astype(float))
-                w = w / w.sum()
-            
-                predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))*1.1
-                predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))*15
-
-            
-          
-            # ---------- SMART SUCCESS PROBABILITY (rating + owners + fit + alignment) ----------
-            def _sig(x: float) -> float:
-                return 1.0 / (1.0 + np.exp(-x))
-            
-            def _interp(x, a, b, c, d):
-                # linear map [a,b] -> [c,d] with clamping
-                if b <= a:
-                    return float((c + d) * 0.5)
-                t = (x - a) / (b - a)
-                return float(c + np.clip(t, 0.0, 1.0) * (d - c))
-            
-            def _q(series, q, default):
-                try:
-                    v = float(np.quantile(pd.to_numeric(series, errors="coerce").dropna().values, q))
-                    return v if np.isfinite(v) else default
-                except Exception:
-                    return default
-            
-            # Use cluster as reference if it’s not tiny; else fall back to all filtered
-            ref = cluster_games if len(cluster_games) >= 30 else view_f
-            
-            # 1) Rating score (blend of percentile and a sigmoid around 7.0)
-            r_med = _q(ref["AvgRating"], 0.50, 6.6)
-            r_p90 = _q(ref["AvgRating"], 0.90, 7.7)
-            rating_pct = stats.percentileofscore(ref["AvgRating"], predicted_rating)  # keep for UI
-            rating_lin = np.clip((predicted_rating - r_med) / max(1e-6, r_p90 - r_med), 0, 1)
-            rating_sig = _sig((predicted_rating - 7.0) / 0.35)
-            rating_score = 0.5 * rating_lin + 0.5 * rating_sig  # 0–1
-            
-            # 2) Owners score (log-scaled vs median→p90 band)
-            o_med = _q(ref["Owned Users"], 0.50, 1200.0)
-            o_p90 = _q(ref["Owned Users"], 0.90, 15000.0)
-            owners_score = np.clip(
-                (np.log1p(max(0.0, float(predicted_owners))) - np.log1p(o_med)) /
-                max(1e-6, (np.log1p(o_p90) - np.log1p(o_med))),
-                0, 1
-            )
-            
-            # 3) Fit score (how tight your neighbors are)
-            dvals = neighbors["__dist"].astype(float).values
-            fit_score = float(np.clip(1.0 - (dvals.mean() / (dvals.max() + 1e-9)), 0.0, 1.0))
-            
-            # 4) Alignment score (complexity/time/price vs segment)
-            cluster_complexity = float(ref["GameWeight"].median())
-            cluster_time = float(ref["Play Time"].median())
-            
-            comp_align = np.clip(1.0 - abs(float(complexity) - cluster_complexity) / 0.7, 0.0, 1.0)
-            time_align = np.clip(1.0 - abs(float(play_time) - cluster_time) / 60.0, 0.0, 1.0)
-            
-            anchor = estimate_anchor_price(
-                float(complexity), component_quality, production_quality, int(max_players), int(play_time)
-            )
-            price_align = np.clip(1.0 - abs(float(target_price) - anchor) / max(15.0, float(anchor)), 0.0, 1.0)
-            
-            align_score = 0.5 * comp_align + 0.3 * time_align + 0.2 * price_align  # 0–1
-            
-            # Weighted blend → raw success (0–1)
-            raw_success = (
-                0.40 * rating_score +
-                0.30 * owners_score +
-                0.15 * fit_score +
-                0.15 * align_score
-            )
-            
-            # Smooth to % with gentle S-curve and calibrated bounds
-            confidence = int(np.round(_interp(_sig((raw_success - 0.55) / 0.18), 0, 1, 30, 97)))
-            percentile = rating_pct  # keep existing UI text working
-################## smart market size section ############################
-            def market_size_label(predicted_owners: int, ref_df: pd.DataFrame, cluster_df: Optional[pd.DataFrame] = None):
-                """
-                Return (label, percentile, cutoffs) for ownership market size.
-                Uses log-space quantiles from the active segment if it's large enough,
-                else falls back to all filtered data, else fixed cutoffs.
-                """
-                # Prefer current segment if it has enough samples; else all filtered
-                ref = cluster_df if (cluster_df is not None and len(cluster_df) >= 50) else ref_df
-                owners_series = pd.to_numeric(ref.get("Owned Users", pd.Series([])), errors="coerce").dropna()
-            
-                if len(owners_series) >= 50:
-                    # log-space to avoid “whales” blowing up thresholds
-                    qs_log = np.quantile(np.log1p(owners_series.values), [0.20, 0.40, 0.60, 0.80])
-                    cutoffs = [int(np.expm1(x)) for x in qs_log]  # [Q20, Q40, Q60, Q80]
-                elif len(owners_series) >= 10:
-                    # simple linear quantiles if sample is small but usable
-                    qs = np.quantile(owners_series.values, [0.25, 0.50, 0.75, 0.90])
-                    cutoffs = [int(q) for q in qs]
-                else:
-                    # sane defaults for board games if we basically have no data
-                    cutoffs = [1_000, 5_000, 20_000, 50_000]
-            
-                x = int(max(0, predicted_owners))
-                if x < cutoffs[0]:
-                    label = "Micro"
-                elif x < cutoffs[1]:
-                    label = "Niche"
-                elif x < cutoffs[2]:
-                    label = "Mid-Market"
-                elif x < cutoffs[3]:
-                    label = "Large Market"
-                else:
-                    label = "Mass Market"
-            
-                pct = None
-                if len(owners_series) > 0:
-                    pct = float(stats.percentileofscore(owners_series.values, x))
-            
-                return label, pct, cutoffs
-
-            market_size, owners_pct, cutoffs = market_size_label(
-                        predicted_owners,
-                        ref_df=view_f,
-                        cluster_df=cluster_games if 'cluster_games' in locals() else None)
-            
-            # === Always render the prediction cards (regardless of models present) ===
-            pred_cols = st.columns(3)
-            
-            with pred_cols[0]:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Predicted Rating", f"{predicted_rating:.2f}/10")
-                st.progress(predicted_rating / 10)
-                st.caption(f"Top {100 - percentile:.0f}% percentile")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with pred_cols[1]:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Expected Owners", f"{predicted_owners:,}")
-                st.caption(f"📊 {market_size} potential")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with pred_cols[2]:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Success Probability", f"{confidence}%")
-                st.progress(confidence / 100)
-                risk_level = "Low Risk" if confidence > 70 else "Moderate Risk" if confidence > 50 else "High Risk"
-                st.caption(f"⚠️ {risk_level}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-
-            narr(
-                "**Reading your forecast.** Treat these only as a prediction, things to consider: "
-                "If the model likes your rating but owners look light, the design might be niche or overpriced. "
-                "If owners look strong but rating is middling, you might be making a bad but marketable game"
-                "Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes."
-            )
-            
-            ########## Pricing & Unit Economics ##########
-            st.markdown("### 💵 Economics and pricing 💵")
-            
-            # Use inputs captured in the form
-            msrp = float(target_price)
-            anchor_price = estimate_anchor_price(
-                complexity, component_quality, production_quality, max_players, play_time
-            )
-            
-            # --- Simple sales estimate: owners minus returns ---
-            owners_base = float(predicted_owners)                   # “reported owners” / model output
-            owners_adj  = owners_base                                # keep var for downstream compatibility
-            effective_units = owners_base * (2.0 - float(returns_pct))  # SALES = owners × (1 - returns)
-            
-            # Unit economics (unchanged)
-            net_per_unit = float(target_price) * (1 - float(channel_fee_pct))
-            gross_profit_per_unit = net_per_unit - (float(unit_cogs) + float(shipping_per_unit))
-            fixed_costs = float(marketing_fixed + misc_fixed)
-            
-            total_gross_profit = gross_profit_per_unit * max(effective_units, 0)
-            net_profit = total_gross_profit - fixed_costs
-            roi_multiple = (net_profit / fixed_costs) if fixed_costs > 0 else float("inf")
-            
-            breakeven_units = (fixed_costs / gross_profit_per_unit) if gross_profit_per_unit > 0 else float("inf")
-            monthly_units = effective_units / max(sales_window, 1)
-            payback_months = math.ceil(breakeven_units / max(monthly_units, 1)) if math.isfinite(breakeven_units) else None
-            gross_margin_pct = (gross_profit_per_unit / net_per_unit) if net_per_unit > 0 else 0.0
-            
-            # Metrics row continues...
-            m1, m2, m3, m4, m5, m6 = st.columns(6)
-            with m1:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-            
-                reported_owners = int(round(owners_base))      # before returns
-                sales_estimate  = int(round(effective_units))  # after returns (this is your sales)
-            
-                delta_abs = sales_estimate - reported_owners
-                delta_pct = (sales_estimate / reported_owners - 1.0) if reported_owners > 0 else 0.0
-            
-                st.metric(
-                    "Sales estimate (assumes 50% reported owners minus returns)",
-                    f"{sales_estimate:,}",
-                    delta=f"{delta_abs:+,} ({delta_pct:+.0%})",
-                    delta_color="normal"
+                        training_cols = None
+                
+                    # 1b) Scaler feature names
+                    if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
+                        training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
+                
+                    # 1c) Model feature names
+                    if training_cols is None:
+                        for _k in ("rating_xgb", "owned_rf", "owned_xgb"):
+                            mdl = models.get(_k)
+                            if mdl is not None and hasattr(mdl, "feature_names_in_"):
+                                training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
+                                break
+                
+                    # 1d) Fall back to current X_all
+                    if training_cols is None:
+                        training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
+                
+                    # 2) Align and optionally scale
+                    X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
+                    X_in = X_pred_raw
+                    if scaler_in is not None:
+                        try:
+                            X_scaled_cols = scaler_in.transform(X_pred_raw.values)
+                            X_in = pd.DataFrame(X_scaled_cols, columns=training_cols)
+                        except Exception:
+                            X_in = X_pred_raw
+                
+                    # 3) Get models; require both
+                    rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
+                    owners_model = models.get("owned_rf") or models.get("owned_xgb")
+                    if rating_model is None or owners_model is None:
+                        raise RuntimeError("Missing rating and/or owners model")
+                
+                    # 4) Predict (raw model outputs; no heuristic remaps)
+                    predicted_rating = float(np.clip(_predict_agnostic(rating_model, X_in, training_cols), 0.0, 10.0))*1.1
+                    owners_val = float(_predict_agnostic(owners_model, X_in, training_cols))
+                    predicted_owners = int(max(0, round(owners_val)))*15
+                
+                except Exception as e:
+                    # Neighbor fallback (kept intact)
+                    # st.warning(f"Model prediction unavailable, using nearest-neighbor fallback: {e}")
+                    neighbors_sorted = neighbors.sort_values(
+                        ["__dist", "BGGId" if "BGGId" in neighbors.columns else "Name"]
+                    ).head(min(topn, len(neighbors)))
+                
+                    w = 1.0 / (1e-9 + neighbors_sorted["__dist"].astype(float))
+                    w = w / w.sum()
+                
+                    predicted_rating = float(np.clip((neighbors_sorted["AvgRating"].astype(float) * w).sum(), 0.0, 10.0))*1.1
+                    predicted_owners = int(max(0, (neighbors_sorted["Owned Users"].astype(float) * w).sum()))*15
+    
+                
+              
+                # ---------- SMART SUCCESS PROBABILITY (rating + owners + fit + alignment) ----------
+                def _sig(x: float) -> float:
+                    return 1.0 / (1.0 + np.exp(-x))
+                
+                def _interp(x, a, b, c, d):
+                    # linear map [a,b] -> [c,d] with clamping
+                    if b <= a:
+                        return float((c + d) * 0.5)
+                    t = (x - a) / (b - a)
+                    return float(c + np.clip(t, 0.0, 1.0) * (d - c))
+                
+                def _q(series, q, default):
+                    try:
+                        v = float(np.quantile(pd.to_numeric(series, errors="coerce").dropna().values, q))
+                        return v if np.isfinite(v) else default
+                    except Exception:
+                        return default
+                
+                # Use cluster as reference if it’s not tiny; else fall back to all filtered
+                ref = cluster_games if len(cluster_games) >= 30 else view_f
+                
+                # 1) Rating score (blend of percentile and a sigmoid around 7.0)
+                r_med = _q(ref["AvgRating"], 0.50, 6.6)
+                r_p90 = _q(ref["AvgRating"], 0.90, 7.7)
+                rating_pct = stats.percentileofscore(ref["AvgRating"], predicted_rating)  # keep for UI
+                rating_lin = np.clip((predicted_rating - r_med) / max(1e-6, r_p90 - r_med), 0, 1)
+                rating_sig = _sig((predicted_rating - 7.0) / 0.35)
+                rating_score = 0.5 * rating_lin + 0.5 * rating_sig  # 0–1
+                
+                # 2) Owners score (log-scaled vs median→p90 band)
+                o_med = _q(ref["Owned Users"], 0.50, 1200.0)
+                o_p90 = _q(ref["Owned Users"], 0.90, 15000.0)
+                owners_score = np.clip(
+                    (np.log1p(max(0.0, float(predicted_owners))) - np.log1p(o_med)) /
+                    max(1e-6, (np.log1p(o_p90) - np.log1p(o_med))),
+                    0, 1
                 )
-            
-                st.caption(f"Reported owners: {reported_owners:,} • returns {int(returns_pct*100)}%")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            with m2:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Gross Margin", f"{gross_margin_pct*100:.0f}%/unit")
-                st.caption(f"Unit GP ${gross_profit_per_unit:.2f}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            with m3:
-                beu_text = f"{int(breakeven_units):,}" if math.isfinite(breakeven_units) and breakeven_units >= 0 else "N/A"
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Break-even Units", beu_text)
-                st.caption("Fixed costs ÷ unit gross profit")
-                st.markdown('</div>', unsafe_allow_html=True)
-            with m4:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Payback", f"{payback_months or 'N/A'} months")
-                st.caption(f"Sales window {sales_window} months")
-                st.markdown('</div>', unsafe_allow_html=True)
-            with m5:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                st.metric("Net Profit", f"${int(net_profit):,}")
-                st.caption("After fixed costs")
-                st.markdown('</div>', unsafe_allow_html=True)
-            with m6:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                roi_disp = "∞" if roi_multiple == float("inf") else f"{roi_multiple:.1f}x"
-                st.metric("ROI", roi_disp)
-                st.caption("Net profit ÷ fixed costs")
-                st.markdown('</div>', unsafe_allow_html=True)
                 
-            ########## design analysis visuals ##########
-            st.markdown("### Your Game and It's Cluster")
-            
-            # A) Rating vs Complexity (your design highlighted)
-            fig_a = go.Figure()
-            
-            rest = view_f
-            seg  = cluster_games
-            
-            # base cloud (muted)
-            fig_a.add_trace(go.Scatter(
-                x=rest["GameWeight"], y=rest["AvgRating"],
-                mode="markers", name="All filtered games",
-                marker=dict(size=5, opacity=0.25),
-                hoverinfo="skip"
-            ))
-            
-            # segment highlight
-            # segment highlight (ORANGE)
-            fig_a.add_trace(go.Scatter(
-                x=seg["GameWeight"], y=seg["AvgRating"],
-                mode="markers",
-                name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
-                marker=dict(
-                    size=8,
-                    opacity=0.85,
-                    color=SECONDARY,                     # 🔶 make segment dots orange
-                    line=dict(width=1, color="rgba(0,0,0,0.25)")
-                ),
-                text=seg.get("Name", None),
-                hovertemplate="<b>%{text}</b><br>Weight: %{x:.2f}<br>Rating: %{y:.2f}<extra></extra>"
-            ))
-            
-            # your game
-            fig_a.add_trace(go.Scatter(
-                x=[complexity], y=[predicted_rating],
-                mode="markers+text", name="Your game",
-                marker=dict(symbol="star", size=18, line=dict(width=1), color="red"),
-                text=["★"], textposition="top center",
-                hovertemplate=f"<b>Your design</b><br>Weight: {complexity:.2f}<br>Pred rating: {predicted_rating:.2f}<extra></extra>"
-            ))
-            
-            fig_a.update_layout(
-                title="Rating vs Complexity (Your design highlighted)",
-                xaxis_title="Complexity (weight 1–5)",
-                yaxis_title="Average Rating",
-                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
-            )
-            st.plotly_chart(fig_a, use_container_width=True)
-            
-            # B) Rating vs Owners (your expected owners)
-            fig_b = go.Figure()
-            
-            fig_b.add_trace(go.Scatter(
-                x=rest["AvgRating"], y=rest["Owned Users"],
-                mode="markers", name="All filtered games",
-                marker=dict(size=5, opacity=0.25),
-                hoverinfo="skip"
-            ))
-            
-            # segment highlight (ORANGE)
-            fig_b.add_trace(go.Scatter(
-                x=seg["AvgRating"], y=seg["Owned Users"],
-                mode="markers",
-                name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
-                marker=dict(
-                    size=8,
-                    opacity=0.85,
-                    color=SECONDARY,                     # 🔶 make segment dots orange
-                    line=dict(width=1, color="rgba(0,0,0,0.25)")
-                ),
-                text=seg.get("Name", None),
-                hovertemplate="<b>%{text}</b><br>Rating: %{x:.2f}<br>Owners: %{y:,}<extra></extra>"
-            ))
-
-            
-            fig_b.add_trace(go.Scatter(
-                x=[predicted_rating], y=[predicted_owners],
-                mode="markers+text", name="Your game (expected owners)",
-                marker=dict(symbol="star", size=18, line=dict(width=1), color="red"),
-                text=[f"★ {predicted_owners:,}"], textposition="bottom center",
-                hovertemplate=f"<b>Your design</b><br>Pred rating: {predicted_rating:.2f}"
-                              f"<br>Expected owners: {predicted_owners:,}<extra></extra>"
-            ))
-            
-            fig_b.update_layout(
-                title="Rating vs Owners (Your expected owners highlighted)",
-                xaxis_title="Average Rating",
-                yaxis_title="Owners (log)",
-                yaxis_type="log",
-                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
-            )
-            st.plotly_chart(fig_b, use_container_width=True)
-            
-            # C) Year vs Rating with segment highlight and your symbol
-            fig_c = go.Figure()
-            
-            fig_c.add_trace(go.Scatter(
-                x=rest["Year Published"], y=rest["AvgRating"],
-                mode="markers", name="All filtered games",
-                marker=dict(size=5, opacity=0.15),
-                hoverinfo="skip"
-            ))
-            
-            # segment highlight (ORANGE)
-            fig_c.add_trace(go.Scatter(
-                x=seg["Year Published"], y=seg["AvgRating"],
-                mode="markers",
-                name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
-                marker=dict(
-                    size=8,
-                    opacity=0.85,
-                    color=SECONDARY,                     # 🔶 make segment dots orange
-                    line=dict(width=1, color="rgba(0,0,0,0.25)")
-                ),
-                text=seg.get("Name", None),
-                hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>"
-            ))
-
-            
-            fig_c.add_trace(go.Scatter(
-                x=[year_published], y=[predicted_rating],
-                mode="markers+text", name="Your game",
-                marker=dict(symbol="star", size=20, line=dict(width=1), color="red"),
-                text=["★"], textposition="middle right",
-                hovertemplate=f"<b>Your design</b><br>Year: {year_published}<br>Pred rating: {predicted_rating:.2f}<extra></extra>"
-            ))
-            
-            fig_c.update_layout(
-                title="Year vs Rating (Segment highlighted; your game marked)",
-                xaxis_title="Year Published",
-                yaxis_title="Average Rating",
-                paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
-            )
-            st.plotly_chart(fig_c, use_container_width=True)
-
-            # Market positioning
-            st.markdown("### 📍 Market Positioning Analysis")
-            
-            st.markdown('<div class="earthcard">', unsafe_allow_html=True)
-            
-            position_cols = st.columns(3)
-            
-            with position_cols[0]:
-                st.markdown("#### 🎯 Competitive Position")
-                cluster_complexity = cluster_games["GameWeight"].median()
-                if complexity > cluster_complexity + 0.3:
-                    st.warning("⚠️ **Higher complexity** than market segment average")
-                    st.write("Consider simplifying or targeting hardcore audience")
-                elif complexity < cluster_complexity - 0.3:
-                    st.success("✅ **More accessible** than competitors")
-                    st.write("Good position for market expansion")
-                else:
-                    st.info("✓ **Well-aligned** with market expectations")
-                    st.write("Focus on unique mechanics/theme for differentiation")
-            
-            with position_cols[1]:
-                st.markdown("#### ⏱️ Duration Analysis")
-                cluster_time = cluster_games["Play Time"].median()
-                if play_time > cluster_time + 30:
-                    st.warning("⚠️ **Longer than typical**")
-                    st.write("Ensure gameplay justifies extended time")
-                elif play_time < cluster_time - 30:
-                    st.success("✅ **Quick to play**")
-                    st.write("Appeals to time-conscious gamers")
-                else:
-                    st.info("✓ **Standard duration**")
-                    st.write("Meets market expectations")
-            
-            with position_cols[2]:
-                st.markdown("#### 💵 Price Positioning")
-                if target_price > 80:
-                    st.warning("⚠️ **Premium pricing**")
-                    st.write("Requires exceptional components/gameplay")
-                elif target_price < 40:
-                    st.success("✅ **Accessible price point**")
-                    st.write("Good for market penetration")
-                else:
-                    st.info("✓ **Market-standard pricing**")
-                    st.write("Competitive with similar games")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Specific recommendations
-            st.markdown("### 💡 Data-Driven Design Recommendations")
-            
-            recommendations = generate_design_recommendations(cluster_games, view_f)
-            
-            st.markdown('<div class="recommendation-card">', unsafe_allow_html=True)
-            for i, rec in enumerate(recommendations, 1):
-                st.write(f"{i}. {rec}")
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Similar games analysis
-            st.markdown("### 🔍 Most Similar Existing Games")
-            st.write(f"Found **{len(neighbors)}** highly similar games in the database:")
-            
-            # Enhanced neighbor display
-            neighbor_display = neighbors[["Name", "Year Published", "AvgRating", "Owned Users", 
-                                         "GameWeight", "Play Time"]].copy()
-            neighbor_display["Success Score"] = (neighbor_display["AvgRating"] - 6) * neighbor_display["Owned Users"] / 1000
-            neighbor_display = neighbor_display.sort_values("Success Score", ascending=False)
-            
-            st.dataframe(
-                neighbor_display.head(10).style.background_gradient(subset=["AvgRating", "Owned Users"]),
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            # Visual comparison
-            st.markdown("### Market Comparison")
-            
-            comp_col1, comp_col2 = st.columns(2)
-            
-            with comp_col1:
-                # Radar chart comparing to segment average
-                categories = ['Complexity', 'Play Time (h)', 'Player Count', 'Age', 'Price']
+                # 3) Fit score (how tight your neighbors are)
+                dvals = neighbors["__dist"].astype(float).values
+                fit_score = float(np.clip(1.0 - (dvals.mean() / (dvals.max() + 1e-9)), 0.0, 1.0))
                 
-                fig_radar = go.Figure()
+                # 4) Alignment score (complexity/time/price vs segment)
+                cluster_complexity = float(ref["GameWeight"].median())
+                cluster_time = float(ref["Play Time"].median())
                 
-                # Your game
-                your_values = [
-                    complexity/5,
-                    play_time/180,  # Normalize to 0-1 (180 min max)
-                    max_players/10,
-                    min_age/18,
-                    target_price/150
-                ]
+                comp_align = np.clip(1.0 - abs(float(complexity) - cluster_complexity) / 0.7, 0.0, 1.0)
+                time_align = np.clip(1.0 - abs(float(play_time) - cluster_time) / 60.0, 0.0, 1.0)
                 
-                # Segment average
-                segment_values = [
-                    cluster_games["GameWeight"].mean()/5,
-                    cluster_games["Play Time"].mean()/180,
-                    cluster_games["Max Players"].mean()/10 if "Max Players" in cluster_games else 0.4,
-                    cluster_games["Min Age"].mean()/18 if "Min Age" in cluster_games else 0.5,
-                    0.33  # Assumed average price position
-                ]
+                anchor = estimate_anchor_price(
+                    float(complexity), component_quality, production_quality, int(max_players), int(play_time)
+                )
+                price_align = np.clip(1.0 - abs(float(target_price) - anchor) / max(15.0, float(anchor)), 0.0, 1.0)
                 
-                fig_radar.add_trace(go.Scatterpolar(
-                    r=your_values,
-                    theta=categories,
-                    fill='toself',
-                    name='Your Design',
-                    line_color=ACCENT
+                align_score = 0.5 * comp_align + 0.3 * time_align + 0.2 * price_align  # 0–1
+                
+                # Weighted blend → raw success (0–1)
+                raw_success = (
+                    0.40 * rating_score +
+                    0.30 * owners_score +
+                    0.15 * fit_score +
+                    0.15 * align_score
+                )
+                
+                # Smooth to % with gentle S-curve and calibrated bounds
+                confidence = int(np.round(_interp(_sig((raw_success - 0.55) / 0.18), 0, 1, 30, 97)))
+                percentile = rating_pct  # keep existing UI text working
+    ################## smart market size section ############################
+                def market_size_label(predicted_owners: int, ref_df: pd.DataFrame, cluster_df: Optional[pd.DataFrame] = None):
+                    """
+                    Return (label, percentile, cutoffs) for ownership market size.
+                    Uses log-space quantiles from the active segment if it's large enough,
+                    else falls back to all filtered data, else fixed cutoffs.
+                    """
+                    # Prefer current segment if it has enough samples; else all filtered
+                    ref = cluster_df if (cluster_df is not None and len(cluster_df) >= 50) else ref_df
+                    owners_series = pd.to_numeric(ref.get("Owned Users", pd.Series([])), errors="coerce").dropna()
+                
+                    if len(owners_series) >= 50:
+                        # log-space to avoid “whales” blowing up thresholds
+                        qs_log = np.quantile(np.log1p(owners_series.values), [0.20, 0.40, 0.60, 0.80])
+                        cutoffs = [int(np.expm1(x)) for x in qs_log]  # [Q20, Q40, Q60, Q80]
+                    elif len(owners_series) >= 10:
+                        # simple linear quantiles if sample is small but usable
+                        qs = np.quantile(owners_series.values, [0.25, 0.50, 0.75, 0.90])
+                        cutoffs = [int(q) for q in qs]
+                    else:
+                        # sane defaults for board games if we basically have no data
+                        cutoffs = [1_000, 5_000, 20_000, 50_000]
+                
+                    x = int(max(0, predicted_owners))
+                    if x < cutoffs[0]:
+                        label = "Micro"
+                    elif x < cutoffs[1]:
+                        label = "Niche"
+                    elif x < cutoffs[2]:
+                        label = "Mid-Market"
+                    elif x < cutoffs[3]:
+                        label = "Large Market"
+                    else:
+                        label = "Mass Market"
+                
+                    pct = None
+                    if len(owners_series) > 0:
+                        pct = float(stats.percentileofscore(owners_series.values, x))
+                
+                    return label, pct, cutoffs
+    
+                market_size, owners_pct, cutoffs = market_size_label(
+                            predicted_owners,
+                            ref_df=view_f,
+                            cluster_df=cluster_games if 'cluster_games' in locals() else None)
+                
+                # === Always render the prediction cards (regardless of models present) ===
+                pred_cols = st.columns(3)
+                
+                with pred_cols[0]:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Predicted Rating", f"{predicted_rating:.2f}/10")
+                    st.progress(predicted_rating / 10)
+                    st.caption(f"Top {100 - percentile:.0f}% percentile")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with pred_cols[1]:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Expected Owners", f"{predicted_owners:,}")
+                    st.caption(f"📊 {market_size} potential")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with pred_cols[2]:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Success Probability", f"{confidence}%")
+                    st.progress(confidence / 100)
+                    risk_level = "Low Risk" if confidence > 70 else "Moderate Risk" if confidence > 50 else "High Risk"
+                    st.caption(f"⚠️ {risk_level}")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+    
+                narr(
+                    "**Reading your forecast.** Treat these only as a prediction, things to consider: "
+                    "If the model likes your rating but owners look light, the design might be niche or overpriced. "
+                    "If owners look strong but rating is middling, you might be making a bad but marketable game"
+                    "Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes."
+                )
+                
+                ########## Pricing & Unit Economics ##########
+                st.markdown("### 💵 Economics and pricing 💵")
+                
+                # Use inputs captured in the form
+                msrp = float(target_price)
+                anchor_price = estimate_anchor_price(
+                    complexity, component_quality, production_quality, max_players, play_time
+                )
+                
+                # --- Simple sales estimate: owners minus returns ---
+                owners_base = float(predicted_owners)                   # “reported owners” / model output
+                owners_adj  = owners_base                                # keep var for downstream compatibility
+                effective_units = owners_base * (2.0 - float(returns_pct))  # SALES = owners × (1 - returns)
+                
+                # Unit economics (unchanged)
+                net_per_unit = float(target_price) * (1 - float(channel_fee_pct))
+                gross_profit_per_unit = net_per_unit - (float(unit_cogs) + float(shipping_per_unit))
+                fixed_costs = float(marketing_fixed + misc_fixed)
+                
+                total_gross_profit = gross_profit_per_unit * max(effective_units, 0)
+                net_profit = total_gross_profit - fixed_costs
+                roi_multiple = (net_profit / fixed_costs) if fixed_costs > 0 else float("inf")
+                
+                breakeven_units = (fixed_costs / gross_profit_per_unit) if gross_profit_per_unit > 0 else float("inf")
+                monthly_units = effective_units / max(sales_window, 1)
+                payback_months = math.ceil(breakeven_units / max(monthly_units, 1)) if math.isfinite(breakeven_units) else None
+                gross_margin_pct = (gross_profit_per_unit / net_per_unit) if net_per_unit > 0 else 0.0
+                
+                # Metrics row continues...
+                m1, m2, m3, m4, m5, m6 = st.columns(6)
+                with m1:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                
+                    reported_owners = int(round(owners_base))      # before returns
+                    sales_estimate  = int(round(effective_units))  # after returns (this is your sales)
+                
+                    delta_abs = sales_estimate - reported_owners
+                    delta_pct = (sales_estimate / reported_owners - 1.0) if reported_owners > 0 else 0.0
+                
+                    st.metric(
+                        "Sales estimate (assumes 50% reported owners minus returns)",
+                        f"{sales_estimate:,}",
+                        delta=f"{delta_abs:+,} ({delta_pct:+.0%})",
+                        delta_color="normal"
+                    )
+                
+                    st.caption(f"Reported owners: {reported_owners:,} • returns {int(returns_pct*100)}%")
+                    st.markdown('</div>', unsafe_allow_html=True)
+    
+                with m2:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Gross Margin", f"{gross_margin_pct*100:.0f}%/unit")
+                    st.caption(f"Unit GP ${gross_profit_per_unit:.2f}")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with m3:
+                    beu_text = f"{int(breakeven_units):,}" if math.isfinite(breakeven_units) and breakeven_units >= 0 else "N/A"
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Break-even Units", beu_text)
+                    st.caption("Fixed costs ÷ unit gross profit")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with m4:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Payback", f"{payback_months or 'N/A'} months")
+                    st.caption(f"Sales window {sales_window} months")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with m5:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    st.metric("Net Profit", f"${int(net_profit):,}")
+                    st.caption("After fixed costs")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with m6:
+                    st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                    roi_disp = "∞" if roi_multiple == float("inf") else f"{roi_multiple:.1f}x"
+                    st.metric("ROI", roi_disp)
+                    st.caption("Net profit ÷ fixed costs")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    
+                ########## design analysis visuals ##########
+                st.markdown("### Your Game and It's Cluster")
+                
+                # A) Rating vs Complexity (your design highlighted)
+                fig_a = go.Figure()
+                
+                rest = view_f
+                seg  = cluster_games
+                
+                # base cloud (muted)
+                fig_a.add_trace(go.Scatter(
+                    x=rest["GameWeight"], y=rest["AvgRating"],
+                    mode="markers", name="All filtered games",
+                    marker=dict(size=5, opacity=0.25),
+                    hoverinfo="skip"
                 ))
                 
-                fig_radar.add_trace(go.Scatterpolar(
-                    r=segment_values,
-                    theta=categories,
-                    fill='toself',
-                    name='Segment Average',
-                    line_color=SECONDARY,
-                    opacity=0.6
-                ))
-                
-                fig_radar.update_layout(
-                    polar=dict(
-                        radialaxis=dict(visible=True, range=[0, 1])
+                # segment highlight
+                # segment highlight (ORANGE)
+                fig_a.add_trace(go.Scatter(
+                    x=seg["GameWeight"], y=seg["AvgRating"],
+                    mode="markers",
+                    name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                    marker=dict(
+                        size=8,
+                        opacity=0.85,
+                        color=SECONDARY,                     # 🔶 make segment dots orange
+                        line=dict(width=1, color="rgba(0,0,0,0.25)")
                     ),
-                    showlegend=True,
-                    title="Design Profile vs Market Segment",
-                    height=400,
-                    paper_bgcolor=CHART_BG
-                )
-                
-                st.plotly_chart(fig_radar, use_container_width=True)
-            
-            with comp_col2:
-                # Success trajectory of similar games
-                fig_trajectory = go.Figure()
-                
-                for _, game in neighbors.head(5).iterrows():
-                    fig_trajectory.add_trace(go.Scatter(
-                        x=[game["GameWeight"]],
-                        y=[game["AvgRating"]],
-                        mode='markers+text',
-                        text=[game["Name"][:15]],
-                        textposition="top center",
-                        marker=dict(size=game["Owned Users"]/1000, color=game["Year Published"]),
-                        showlegend=False,
-                        hovertemplate=f"<b>{game['Name']}</b><br>Rating: {game['AvgRating']:.2f}<br>Owners: {game['Owned Users']:,}<extra></extra>"
-                    ))
-                
-                # Add your game prediction
-                fig_trajectory.add_trace(go.Scatter(
-                    x=[complexity],
-                    y=[predicted_rating],
-                    mode='markers',
-                    name='Your Game (Predicted)',
-                    marker=dict(size=20, color='red', symbol='star'),
-                    hovertemplate=f"<b>Your Design</b><br>Predicted Rating: {predicted_rating:.2f}<extra></extra>"
+                    text=seg.get("Name", None),
+                    hovertemplate="<b>%{text}</b><br>Weight: %{x:.2f}<br>Rating: %{y:.2f}<extra></extra>"
                 ))
                 
-                fig_trajectory.update_layout(
-                    title="Similar Games Performance Map",
-                    xaxis_title="Complexity",
-                    yaxis_title="Rating",
-                    height=400,
-                    paper_bgcolor=CHART_BG,
-                    showlegend=True
+                # your game
+                fig_a.add_trace(go.Scatter(
+                    x=[complexity], y=[predicted_rating],
+                    mode="markers+text", name="Your game",
+                    marker=dict(symbol="star", size=18, line=dict(width=1), color="red"),
+                    text=["★"], textposition="top center",
+                    hovertemplate=f"<b>Your design</b><br>Weight: {complexity:.2f}<br>Pred rating: {predicted_rating:.2f}<extra></extra>"
+                ))
+                
+                fig_a.update_layout(
+                    title="Rating vs Complexity (Your design highlighted)",
+                    xaxis_title="Complexity (weight 1–5)",
+                    yaxis_title="Average Rating",
+                    paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
+                )
+                st.plotly_chart(fig_a, use_container_width=True)
+                
+                # B) Rating vs Owners (your expected owners)
+                fig_b = go.Figure()
+                
+                fig_b.add_trace(go.Scatter(
+                    x=rest["AvgRating"], y=rest["Owned Users"],
+                    mode="markers", name="All filtered games",
+                    marker=dict(size=5, opacity=0.25),
+                    hoverinfo="skip"
+                ))
+                
+                # segment highlight (ORANGE)
+                fig_b.add_trace(go.Scatter(
+                    x=seg["AvgRating"], y=seg["Owned Users"],
+                    mode="markers",
+                    name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                    marker=dict(
+                        size=8,
+                        opacity=0.85,
+                        color=SECONDARY,                     # 🔶 make segment dots orange
+                        line=dict(width=1, color="rgba(0,0,0,0.25)")
+                    ),
+                    text=seg.get("Name", None),
+                    hovertemplate="<b>%{text}</b><br>Rating: %{x:.2f}<br>Owners: %{y:,}<extra></extra>"
+                ))
+    
+                
+                fig_b.add_trace(go.Scatter(
+                    x=[predicted_rating], y=[predicted_owners],
+                    mode="markers+text", name="Your game (expected owners)",
+                    marker=dict(symbol="star", size=18, line=dict(width=1), color="red"),
+                    text=[f"★ {predicted_owners:,}"], textposition="bottom center",
+                    hovertemplate=f"<b>Your design</b><br>Pred rating: {predicted_rating:.2f}"
+                                  f"<br>Expected owners: {predicted_owners:,}<extra></extra>"
+                ))
+                
+                fig_b.update_layout(
+                    title="Rating vs Owners (Your expected owners highlighted)",
+                    xaxis_title="Average Rating",
+                    yaxis_title="Owners (log)",
+                    yaxis_type="log",
+                    paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
+                )
+                st.plotly_chart(fig_b, use_container_width=True)
+                
+                # C) Year vs Rating with segment highlight and your symbol
+                fig_c = go.Figure()
+                
+                fig_c.add_trace(go.Scatter(
+                    x=rest["Year Published"], y=rest["AvgRating"],
+                    mode="markers", name="All filtered games",
+                    marker=dict(size=5, opacity=0.15),
+                    hoverinfo="skip"
+                ))
+                
+                # segment highlight (ORANGE)
+                fig_c.add_trace(go.Scatter(
+                    x=seg["Year Published"], y=seg["AvgRating"],
+                    mode="markers",
+                    name=cluster_labels.get(cluster_id, f"Segment {cluster_id}"),
+                    marker=dict(
+                        size=8,
+                        opacity=0.85,
+                        color=SECONDARY,                     # 🔶 make segment dots orange
+                        line=dict(width=1, color="rgba(0,0,0,0.25)")
+                    ),
+                    text=seg.get("Name", None),
+                    hovertemplate="<b>%{text}</b><br>Year: %{x}<br>Rating: %{y:.2f}<extra></extra>"
+                ))
+    
+                
+                fig_c.add_trace(go.Scatter(
+                    x=[year_published], y=[predicted_rating],
+                    mode="markers+text", name="Your game",
+                    marker=dict(symbol="star", size=20, line=dict(width=1), color="red"),
+                    text=["★"], textposition="middle right",
+                    hovertemplate=f"<b>Your design</b><br>Year: {year_published}<br>Pred rating: {predicted_rating:.2f}<extra></extra>"
+                ))
+                
+                fig_c.update_layout(
+                    title="Year vs Rating (Segment highlighted; your game marked)",
+                    xaxis_title="Year Published",
+                    yaxis_title="Average Rating",
+                    paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
+                )
+                st.plotly_chart(fig_c, use_container_width=True)
+    
+                # Market positioning
+                st.markdown("### 📍 Market Positioning Analysis")
+                
+                st.markdown('<div class="earthcard">', unsafe_allow_html=True)
+                
+                position_cols = st.columns(3)
+                
+                with position_cols[0]:
+                    st.markdown("#### 🎯 Competitive Position")
+                    cluster_complexity = cluster_games["GameWeight"].median()
+                    if complexity > cluster_complexity + 0.3:
+                        st.warning("⚠️ **Higher complexity** than market segment average")
+                        st.write("Consider simplifying or targeting hardcore audience")
+                    elif complexity < cluster_complexity - 0.3:
+                        st.success("✅ **More accessible** than competitors")
+                        st.write("Good position for market expansion")
+                    else:
+                        st.info("✓ **Well-aligned** with market expectations")
+                        st.write("Focus on unique mechanics/theme for differentiation")
+                
+                with position_cols[1]:
+                    st.markdown("#### ⏱️ Duration Analysis")
+                    cluster_time = cluster_games["Play Time"].median()
+                    if play_time > cluster_time + 30:
+                        st.warning("⚠️ **Longer than typical**")
+                        st.write("Ensure gameplay justifies extended time")
+                    elif play_time < cluster_time - 30:
+                        st.success("✅ **Quick to play**")
+                        st.write("Appeals to time-conscious gamers")
+                    else:
+                        st.info("✓ **Standard duration**")
+                        st.write("Meets market expectations")
+                
+                with position_cols[2]:
+                    st.markdown("#### 💵 Price Positioning")
+                    if target_price > 80:
+                        st.warning("⚠️ **Premium pricing**")
+                        st.write("Requires exceptional components/gameplay")
+                    elif target_price < 40:
+                        st.success("✅ **Accessible price point**")
+                        st.write("Good for market penetration")
+                    else:
+                        st.info("✓ **Market-standard pricing**")
+                        st.write("Competitive with similar games")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Specific recommendations
+                st.markdown("### 💡 Data-Driven Design Recommendations")
+                
+                recommendations = generate_design_recommendations(cluster_games, view_f)
+                
+                st.markdown('<div class="recommendation-card">', unsafe_allow_html=True)
+                for i, rec in enumerate(recommendations, 1):
+                    st.write(f"{i}. {rec}")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Similar games analysis
+                st.markdown("### 🔍 Most Similar Existing Games")
+                st.write(f"Found **{len(neighbors)}** highly similar games in the database:")
+                
+                # Enhanced neighbor display
+                neighbor_display = neighbors[["Name", "Year Published", "AvgRating", "Owned Users", 
+                                             "GameWeight", "Play Time"]].copy()
+                neighbor_display["Success Score"] = (neighbor_display["AvgRating"] - 6) * neighbor_display["Owned Users"] / 1000
+                neighbor_display = neighbor_display.sort_values("Success Score", ascending=False)
+                
+                st.dataframe(
+                    neighbor_display.head(10).style.background_gradient(subset=["AvgRating", "Owned Users"]),
+                    use_container_width=True,
+                    hide_index=True
                 )
                 
-                st.plotly_chart(fig_trajectory, use_container_width=True)
-            
+                # Visual comparison
+                st.markdown("### Market Comparison")
+                
+                comp_col1, comp_col2 = st.columns(2)
+                
+                with comp_col1:
+                    # Radar chart comparing to segment average
+                    categories = ['Complexity', 'Play Time (h)', 'Player Count', 'Age', 'Price']
+                    
+                    fig_radar = go.Figure()
+                    
+                    # Your game
+                    your_values = [
+                        complexity/5,
+                        play_time/180,  # Normalize to 0-1 (180 min max)
+                        max_players/10,
+                        min_age/18,
+                        target_price/150
+                    ]
+                    
+                    # Segment average
+                    segment_values = [
+                        cluster_games["GameWeight"].mean()/5,
+                        cluster_games["Play Time"].mean()/180,
+                        cluster_games["Max Players"].mean()/10 if "Max Players" in cluster_games else 0.4,
+                        cluster_games["Min Age"].mean()/18 if "Min Age" in cluster_games else 0.5,
+                        0.33  # Assumed average price position
+                    ]
+                    
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=your_values,
+                        theta=categories,
+                        fill='toself',
+                        name='Your Design',
+                        line_color=ACCENT
+                    ))
+                    
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=segment_values,
+                        theta=categories,
+                        fill='toself',
+                        name='Segment Average',
+                        line_color=SECONDARY,
+                        opacity=0.6
+                    ))
+                    
+                    fig_radar.update_layout(
+                        polar=dict(
+                            radialaxis=dict(visible=True, range=[0, 1])
+                        ),
+                        showlegend=True,
+                        title="Design Profile vs Market Segment",
+                        height=400,
+                        paper_bgcolor=CHART_BG
+                    )
+                    
+                    st.plotly_chart(fig_radar, use_container_width=True)
+                
+                with comp_col2:
+                    # Success trajectory of similar games
+                    fig_trajectory = go.Figure()
+                    
+                    for _, game in neighbors.head(5).iterrows():
+                        fig_trajectory.add_trace(go.Scatter(
+                            x=[game["GameWeight"]],
+                            y=[game["AvgRating"]],
+                            mode='markers+text',
+                            text=[game["Name"][:15]],
+                            textposition="top center",
+                            marker=dict(size=game["Owned Users"]/1000, color=game["Year Published"]),
+                            showlegend=False,
+                            hovertemplate=f"<b>{game['Name']}</b><br>Rating: {game['AvgRating']:.2f}<br>Owners: {game['Owned Users']:,}<extra></extra>"
+                        ))
+                    
+                    # Add your game prediction
+                    fig_trajectory.add_trace(go.Scatter(
+                        x=[complexity],
+                        y=[predicted_rating],
+                        mode='markers',
+                        name='Your Game (Predicted)',
+                        marker=dict(size=20, color='red', symbol='star'),
+                        hovertemplate=f"<b>Your Design</b><br>Predicted Rating: {predicted_rating:.2f}<extra></extra>"
+                    ))
+                    
+                    fig_trajectory.update_layout(
+                        title="Similar Games Performance Map",
+                        xaxis_title="Complexity",
+                        yaxis_title="Rating",
+                        height=400,
+                        paper_bgcolor=CHART_BG,
+                        showlegend=True
+                    )
+                    
+                    st.plotly_chart(fig_trajectory, use_container_width=True)
+except Exception as e:
+        _self_heal_reset_and_rerun("ANALYZE", e)            
 # Trend Analysis Tab
 with tab_trends:
     st.markdown("## 📈 Market Trend Analysis")
@@ -2793,6 +2810,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
