@@ -1323,13 +1323,11 @@ with tab_intel:
             st.markdown('</div>', unsafe_allow_html=True)
 
     narr("""
-    **How to use these segments.** The Opportunity Score is a weighted composite that highlights 
-    where healthy demand meets limited recent supply. It combines growth rate in releases over the last three years (30%), 
-    average rating normalized to a ten-point scale (25%), median ownership as a proxy for audience size (20%), low recent 
-    saturation in the category (15%), and the success rate of games scoring seven or higher (10%). The strongest segments often 
-    fall in the moderate complexity range with meaningful decision space, 60 to 90 minutes of play, and a minimum age of ten or above. 
-    Cooperative designs with solo support can double engagement because players can learn alone and then bring others into the experience. 
-    A segment that is small but consistently strong is not a red flag; it is a green light for a focused design that respects both time and attention..
+    **How to use these segments.** Opportunity Score highlights spots where demand is healthy and recent supply is thin. 
+    We weight it like this: 3-year release growth 30%, average rating on a 10 point scale 25%, median owners as the audience proxy 20%, 
+    low recent saturation 15%, and the share of titles at 7.0 or higher 10%. Strong pockets tend to be mid-weight with real decision space, 60 to 90 minutes, 
+    age 10+. Co-op with a solo mode often lifts uptake; people learn alone, then bring it to the table (Spirit Island is a clean example). 
+    A small segment that keeps posting solid ratings and owners is a good bet.
     """)
 
     # Market evolution timeline
@@ -1337,8 +1335,9 @@ with tab_intel:
     evolution_fig = create_market_evolution_timeline(view_f)
     st.plotly_chart(evolution_fig, use_container_width=True)
     narr("""
-    **What changed over time.** The boom after Catan raised the bar. Ratings rose and designers learned to do more with less. 
-    Complexity ticked up, yet playtime did not. That is craft improving. Strategic richness without bloat. The market now rewards clarity, replay, and respect for the clock.
+    **What changed over time.** Since Catan, there was a boardgame boom. 
+    Complexity dropped to appeal to more people and then grew as those people got better at games. 
+    The average game today beats Catan in ratings illustrating how much better game design has gotten.
     """)
 
     # Key insights
@@ -1348,7 +1347,7 @@ with tab_intel:
     
     with insight_col1:
         st.markdown('<div class="insight-box">', unsafe_allow_html=True)
-        st.markdown("#### 🚀 Growth Sectors")
+        st.markdown("#### Growth Sectors")
         
         # Calculate growth by year
         recent = view_f[view_f["Year Published"] >= CURRENT_YEAR - 3]
@@ -1374,7 +1373,7 @@ with tab_intel:
     
     with insight_col2:
         st.markdown('<div class="insight-box">', unsafe_allow_html=True)
-        st.markdown("#### 🎯 Sweet Spots Identified")
+        st.markdown("#### Sweet Spots Identified")
         
         # Find optimal characteristics
         top_games = view_f[view_f["AvgRating"] >= 7.5]
@@ -1410,7 +1409,8 @@ with tab_intel:
         st.plotly_chart(time_success_fig, use_container_width=True)
         
     narr("""
-    **Complexity and time, together.** Longer games tend to rate higher, but there is a ceiling on how many people will buy a three hour commitment. Short and complex is the unicorn. When a game is deep and plays fast, it becomes a staple. If a game is simple, keep it short. Stretching a simple idea for an hour turns charm into chores.
+    **Complexity and time, together.** Longer games tend to rate higher, but there is a ceiling on how many people will buy a three hour commitment. 
+    Short and complex is the unicorn. When a game is difficult and plays fast, it does well or terribly. If a game is simple, keep it short. Stretching a simple idea for an hour is tough.
     """)
 
 # Design Wizard Tab  
@@ -1851,9 +1851,9 @@ with tab_wizard:
             
 
             narr(
-                "**Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. "
-                "If the model likes your rating but owners look soft, the design might be niche or overpriced. "
-                "If owners look strong but rating is middling, you might have a fun toy that needs sharper decisions. "
+                "**Reading your forecast.** Treat these only as a prediction, things to consider: "
+                "If the model likes your rating but owners look light, the design might be niche or overpriced. "
+                "If owners look strong but rating is middling, you might be making a bad but marketable game"
                 "Price can move demand, but not forever. Anchor the MSRP to what the experience feels like in the first 15 minutes."
             )
             
@@ -2069,10 +2069,6 @@ with tab_wizard:
                 paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG, height=420
             )
             st.plotly_chart(fig_c, use_container_width=True)
-
-            narr("""
-            **Position with intent.** If you sit to the right on complexity, give players early wins. If your playtime is shorter than the segment, lean on tension not upkeep. If your price is friendly, make the first play magical then let depth unfold on play three.
-            """)
 
             # Market positioning
             st.markdown("### 📍 Market Positioning Analysis")
@@ -2437,7 +2433,10 @@ with tab_trends:
     st.plotly_chart(fig_themes, use_container_width=True)
 
     narr("""
-    **Where the puck is going.** Themes cycle, but the constant is respect for time. Designers are packing strategy into tighter sessions. That is not dumbing things down. That is craft. If you are designing into the near future, pair a strong theme with clean teach, depth that reveals across plays, and a clear promise on the box about time.
+    **Where the puck is going.** Themes cycle, but the constant is respect for time. 
+    Designers are packing strategy into tighter sessions. That is not dumbing things down. 
+    That is improving game design and smarter players. If you are designing into the near future, pair a strong theme with clean 
+    teach, depth that reveals across plays, and a clear promise on the box about time.
     """)
 
     # Complexity creep analysis
@@ -2532,9 +2531,6 @@ with tab_trends:
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-    narr("""
-    **Two year outlook.** Expect a steady stream of midweight designs that play under two hours. Expect more solo modes. Expect fewer lazy products. The audience is informed and generous when the game respects them.
-    """)
 # Segment Explorer Tab
 with tab_segments:
     st.markdown("## 🗺️ Market Segment Deep Dive")
@@ -2579,13 +2575,16 @@ with tab_segments:
         st.caption("Opportunity score")
     
     narr("""
-    **Reading a segment.** Look at three things. What the segment loves to do (mechanics above thirty percent). How long the table sits (median playtime). Where quality clusters (rating distribution). If your idea fights the segment norms, make the reason obvious and delightful.
+    **Reading a segment.** Look at three things. What the segment loves to do 
+    (mechanics above thirty percent). How long the table sits (median playtime). 
+    Where quality clusters (rating distribution). If your idea fights the segment norms, make the reason obvious and delightful. 
+    These are not prognosi's for a game, but pitfalls to avoid in a cluster.
     """)
     # Segment characteristics
     segment_cols = st.columns(2)
     
     with segment_cols[0]:
-        st.markdown("#### 🎯 Defining Characteristics")
+        st.markdown("#### Defining Characteristics")
         
         # Find most common mechanics
         mech_usage = {}
@@ -2692,7 +2691,8 @@ with tab_segments:
     
     st.plotly_chart(fig_segment_evolution, use_container_width=True)
     narr("""
-    **Entering the segment.** If releases are rising and ratings hold, the space is hungry. If releases spike and ratings sag, the space needs curation. Add one new idea that matters, not six that confuse.
+    **Entering the segment.** If releases are rising and ratings hold, the there is likely unmet demand. 
+    If releases spike and ratings sag, thats a tough and saturated market. Add one new idea that matters in a high demand space.
     """)
     # Opportunities in segment
     st.markdown("#### 💡 Opportunities in This Segment")
@@ -2742,9 +2742,8 @@ with tab_synergies:
         st.plotly_chart(fig_network, use_container_width=True)
         
         narr("""
-        **Mechanics that work.** Certain combinations produce clean decision space—worker placement with a market, 
-        co-op with variable powers, drafting with tempo pressure. Resist feature creep. Anchor on one or two core systems 
-        and let the rest emerge through play.
+        **Mechanics that work.** Certain combinations produce high ratings. Resist feature creep. Anchor on one or two core systems 
+        and let the rest emerge through playtesting.
         """)
         
         # Underexplored combinations
@@ -2791,9 +2790,13 @@ with tab_synergies:
 
 # Footer 
 narr("""
-**Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
+**Bottom line.** Games do not suck anymore. 
+The average modern title beats the best games of the 90's that started the boom. The reason is simple. 
+Designers learned to respect time, balance rules, create novel mechanics, and make the first play feel good. 
+You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
