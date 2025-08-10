@@ -128,7 +128,7 @@ st.markdown(f"""
 # Configuration
 DEFAULT_PARQUET_PATH = "cleaned_large_bgg_dataset.parquet"
 DEFAULT_CSV_PATH = "cleaned_large_bgg_dataset.csv"
-CURRENT_YEAR = 2022
+CURRENT_YEAR = 2021
 
 EXCLUDE_FOR_CLUSTERING = [
     "Owned Users", "BayesAvgRating", "AvgRating", "Users Rated", "BGG Rank", 
@@ -1439,7 +1439,7 @@ with tab_wizard:
         spec_cols = st.columns(4)
         with spec_cols[0]:
             year_published = st.number_input("Release Year (2022 data incomplete, assumes 2021)", value=preset_data["year"],
-                                             min_value=CURRENT_YEAR-30, max_value=CURRENT_YEAR-1, key="year_input")
+                                             min_value=CURRENT_YEAR-30, max_value=CURRENT_YEAr, key="year_input")
             min_players = st.number_input("Min Players", value=preset_data["min_players"],
                                           min_value=1, max_value=10, key="min_players_input")
         with spec_cols[1]:
@@ -2670,6 +2670,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
