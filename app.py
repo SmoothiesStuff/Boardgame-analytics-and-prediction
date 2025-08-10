@@ -1696,14 +1696,123 @@ with tab_wizard:
 
 ###################end stand in block ####################################
             # Confidence & percentile — used in both paths
-            percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
-            d = neighbors["__dist"]
-            denom = (d.std() if d.std() > 1e-6 else 1.0)
-            confidence = int(np.clip(70 + (1 - d.mean() / denom) * 20, 40, 95))
-            market_size = "Niche" if predicted_owners < 5_000 else "Mid-Market" if predicted_owners < 20_000 else "Mass Market"
+            
+          
+            # ---------- SMART SUCCESS PROBABILITY (rating + owners + fit + alignment) ----------
+            def _sig(x: float) -> float:
+                return 1.0 / (1.0 + np.exp(-x))
+            
+            def _interp(x, a, b, c, d):
+                # linear map [a,b] -> [c,d] with clamping
+                if b <= a:
+                    return float((c + d) * 0.5)
+                t = (x - a) / (b - a)
+                return float(c + np.clip(t, 0.0, 1.0) * (d - c))
+            
+            def _q(series, q, default):
+                try:
+                    v = float(np.quantile(pd.to_numeric(series, errors="coerce").dropna().values, q))
+                    return v if np.isfinite(v) else default
+                except Exception:
+                    return default
+            
+            # Use cluster as reference if it’s not tiny; else fall back to all filtered
+            ref = cluster_games if len(cluster_games) >= 30 else view_f
+            
+            # 1) Rating score (blend of percentile and a sigmoid around 7.0)
+            r_med = _q(ref["AvgRating"], 0.50, 6.6)
+            r_p90 = _q(ref["AvgRating"], 0.90, 7.7)
+            rating_pct = stats.percentileofscore(ref["AvgRating"], predicted_rating)  # keep for UI
+            rating_lin = np.clip((predicted_rating - r_med) / max(1e-6, r_p90 - r_med), 0, 1)
+            rating_sig = _sig((predicted_rating - 7.0) / 0.35)
+            rating_score = 0.5 * rating_lin + 0.5 * rating_sig  # 0–1
+            
+            # 2) Owners score (log-scaled vs median→p90 band)
+            o_med = _q(ref["Owned Users"], 0.50, 1200.0)
+            o_p90 = _q(ref["Owned Users"], 0.90, 15000.0)
+            owners_score = np.clip(
+                (np.log1p(max(0.0, float(predicted_owners))) - np.log1p(o_med)) /
+                max(1e-6, (np.log1p(o_p90) - np.log1p(o_med))),
+                0, 1
+            )
+            
+            # 3) Fit score (how tight your neighbors are)
+            dvals = neighbors["__dist"].astype(float).values
+            fit_score = float(np.clip(1.0 - (dvals.mean() / (dvals.max() + 1e-9)), 0.0, 1.0))
+            
+            # 4) Alignment score (complexity/time/price vs segment)
+            cluster_complexity = float(ref["GameWeight"].median())
+            cluster_time = float(ref["Play Time"].median())
+            
+            comp_align = np.clip(1.0 - abs(float(complexity) - cluster_complexity) / 0.7, 0.0, 1.0)
+            time_align = np.clip(1.0 - abs(float(play_time) - cluster_time) / 60.0, 0.0, 1.0)
+            
+            anchor = estimate_anchor_price(
+                float(complexity), component_quality, production_quality, int(max_players), int(play_time)
+            )
+            price_align = np.clip(1.0 - abs(float(target_price) - anchor) / max(15.0, float(anchor)), 0.0, 1.0)
+            
+            align_score = 0.5 * comp_align + 0.3 * time_align + 0.2 * price_align  # 0–1
+            
+            # Weighted blend → raw success (0–1)
+            raw_success = (
+                0.40 * rating_score +
+                0.30 * owners_score +
+                0.15 * fit_score +
+                0.15 * align_score
+            )
+            
+            # Smooth to % with gentle S-curve and calibrated bounds
+            confidence = int(np.round(_interp(_sig((raw_success - 0.55) / 0.18), 0, 1, 30, 97)))
+            percentile = rating_pct  # keep your existing UI text working
+################## smart market size section ############################
+            def market_size_label(predicted_owners: int, ref_df: pd.DataFrame, cluster_df: Optional[pd.DataFrame] = None):
+                """
+                Return (label, percentile, cutoffs) for ownership market size.
+                Uses log-space quantiles from the active segment if it's large enough,
+                else falls back to all filtered data, else fixed cutoffs.
+                """
+                # Prefer current segment if it has enough samples; else all filtered
+                ref = cluster_df if (cluster_df is not None and len(cluster_df) >= 50) else ref_df
+                owners_series = pd.to_numeric(ref.get("Owned Users", pd.Series([])), errors="coerce").dropna()
+            
+                if len(owners_series) >= 50:
+                    # log-space to avoid “whales” blowing up thresholds
+                    qs_log = np.quantile(np.log1p(owners_series.values), [0.20, 0.40, 0.60, 0.80])
+                    cutoffs = [int(np.expm1(x)) for x in qs_log]  # [Q20, Q40, Q60, Q80]
+                elif len(owners_series) >= 10:
+                    # simple linear quantiles if sample is small but usable
+                    qs = np.quantile(owners_series.values, [0.25, 0.50, 0.75, 0.90])
+                    cutoffs = [int(q) for q in qs]
+                else:
+                    # sane defaults for board games if we basically have no data
+                    cutoffs = [1_000, 5_000, 20_000, 50_000]
+            
+                x = int(max(0, predicted_owners))
+                if x < cutoffs[0]:
+                    label = "Micro"
+                elif x < cutoffs[1]:
+                    label = "Niche"
+                elif x < cutoffs[2]:
+                    label = "Mid-Market"
+                elif x < cutoffs[3]:
+                    label = "Large Market"
+                else:
+                    label = "Mass Market"
+            
+                pct = None
+                if len(owners_series) > 0:
+                    pct = float(stats.percentileofscore(owners_series.values, x))
+            
+                return label, pct, cutoffs
+
+            market_size, owners_pct, cutoffs = market_size_label(
+                        predicted_owners,
+                        ref_df=view_f,
+                        cluster_df=cluster_games if 'cluster_games' in locals() else None)
             
             # === Always render the prediction cards (regardless of models present) ===
-            pred_cols = st.columns(4)
+            pred_cols = st.columns(3)
             
             with pred_cols[0]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
@@ -1726,12 +1835,6 @@ with tab_wizard:
                 st.caption(f"⚠️ {risk_level}")
                 st.markdown('</div>', unsafe_allow_html=True)
             
-            with pred_cols[3]:
-                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                # Placeholders; real finance numbers are computed later
-                st.metric("ROI Estimate", "—")
-                st.caption("Will compute below from your pricing inputs")
-                st.markdown('</div>', unsafe_allow_html=True)
 
             narr(
                 "**Reading your forecast.** Treat predicted rating, owners, and risk as a compass, not a verdict. "
@@ -2704,6 +2807,7 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
 
 
 
