@@ -285,6 +285,29 @@ def toggle_feature(profile: dict, X_cols, on: bool, names):
                 profile[alt] = 1
 
 
+def _predict_agnostic(model, X_df, feature_names):
+# Try sklearn-style first
+    try:
+        return float(model.predict(X_df.values)[0])
+    except Exception:
+        pass
+    # Try native XGBoost Booster
+    try:
+        import xgboost as xgb
+        dtest = xgb.DMatrix(X_df.values, feature_names=list(feature_names))
+        it = getattr(model, "best_iteration", None)
+        if it is not None:
+            try:
+                return float(model.predict(dtest, iteration_range=(0, it + 1))[0])
+            except TypeError:
+                pass
+        ntree = getattr(model, "best_ntree_limit", 0)
+        if ntree:
+            return float(model.predict(dtest, ntree_limit=ntree)[0])
+        return float(model.predict(dtest)[0])
+    except Exception:
+        raise
+        
 def align_profile_to_training(profile: dict, training_cols: list[str], scaler=None) -> pd.DataFrame:
     """Enhanced profile alignment with robust type handling and validation."""
     training_cols = [c for c in training_cols if c not in PRED_EXCLUDE]
@@ -1496,32 +1519,6 @@ with tab_wizard:
     
         # >>> Submit button must be inside the form <<<
         analyze_button = st.form_submit_button("🔮 Analyze Design & Generate Predictions", type="primary", use_container_width=True)
-
-    def _predict_agnostic(model, X_df, feature_names):
-    """
-    Works with sklearn estimators OR xgboost.Booster saved from the notebook.
-    """
-    # Try sklearn-style first
-    try:
-        return float(model.predict(X_df.values)[0])
-    except Exception:
-        pass
-    # Try native XGBoost Booster
-    try:
-        import xgboost as xgb
-        dtest = xgb.DMatrix(X_df.values, feature_names=list(feature_names))
-        it = getattr(model, "best_iteration", None)
-        if it is not None:
-            try:
-                return float(model.predict(dtest, iteration_range=(0, it + 1))[0])
-            except TypeError:
-                pass
-        ntree = getattr(model, "best_ntree_limit", 0)
-        if ntree:
-            return float(model.predict(dtest, ntree_limit=ntree)[0])
-        return float(model.predict(dtest)[0])
-    except Exception:
-        raise
     
     if analyze_button:
         # Build comprehensive profile
@@ -1577,71 +1574,87 @@ with tab_wizard:
             st.markdown("### 🤖 AI Performance Predictions")
 
             # --- Load models and compute predictions (minimal, aligned to training) ---
-            models = load_models(MODEL_PATHS)
-            
-            if not any(k in models for k in ("rating_xgb","owned_rf","owned_xgb")):
-                # Fallback to neighbor-based guesses
-                predicted_rating  = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
-                predicted_owners  = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
-                percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
-                d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
-                confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
-            else:
-                # 1) Recover training columns (prefer scaler -> saved JSON -> model -> fallback)
-                scaler_in = models.get("_input_scaler")
-                training_cols = None
-                if scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
-                    training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
-                elif os.path.exists("models/train_model_feature_names.json"):
-                    import json
-                    try:
-                        with open("models/train_model_feature_names.json","r",encoding="utf-8") as f:
-                            training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
-                    except Exception:
-                        training_cols = None
-                if training_cols is None:
-                    for _k in ("rating_xgb","owned_rf","owned_xgb"):
-                        mdl = models.get(_k)
-                        if mdl is not None and hasattr(mdl, "feature_names_in_"):
-                            training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
-                            break
-                if training_cols is None:
-                    training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
-            
-                # 2) Build aligned single row (reuses your existing helper)
-                X_pred = align_profile_to_training(profile, training_cols, scaler=scaler_in)
-            
-                # 3) Predict rating
-                rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
-                if rating_model is not None:
-                    try:
-                        predicted_rating = _predict_agnostic(rating_model, X_pred, training_cols)
-                    except Exception:
-                        predicted_rating = float(neighbors["AvgRating"].mean())
-                else:
+           # --- Load models and compute predictions (aligned to training artifacts) ---
+        models = load_models(MODEL_PATHS)
+        
+        if not any(k in models for k in ("rating_xgb", "owned_rf", "owned_xgb")):
+            # Fallback to neighbor-based guesses
+            predicted_rating  = float(np.clip(neighbors["AvgRating"].mean() + np.random.normal(0, 0.2), 5.0, 8.8))
+            predicted_owners  = int(neighbors["Owned Users"].median() * np.random.uniform(0.85, 1.15))
+            percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
+            d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
+            confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
+        else:
+            # 1) Recover training feature order (prefer saved JSON)
+            scaler_in = models.get("_input_scaler")
+            training_cols = None
+        
+            # Prefer the artifact you saved with the notebook
+            if os.path.exists(FEATURE_COLS_PATH):
+                import json
+                try:
+                    with open(FEATURE_COLS_PATH, "r", encoding="utf-8") as f:
+                        training_cols = [c for c in json.load(f) if c not in PRED_EXCLUDE]
+                except Exception:
+                    training_cols = None
+        
+            # Then try scaler’s recorded feature names
+            if training_cols is None and scaler_in is not None and hasattr(scaler_in, "feature_names_in_"):
+                training_cols = [c for c in scaler_in.feature_names_in_ if c not in PRED_EXCLUDE]
+        
+            # Then try model feature names
+            if training_cols is None:
+                for _k in ("rating_xgb","owned_rf","owned_xgb"):
+                    mdl = models.get(_k)
+                    if mdl is not None and hasattr(mdl, "feature_names_in_"):
+                        training_cols = [c for c in mdl.feature_names_in_ if c not in PRED_EXCLUDE]
+                        break
+        
+            # Fallback: dataset columns (minus excludes)
+            if training_cols is None:
+                training_cols = [c for c in X_all.columns if c not in PRED_EXCLUDE]
+        
+            # 2) Build aligned row, then scale with the saved scaler
+            X_pred_raw = align_profile_to_training(profile, training_cols, scaler=None)
+        
+            X_in = X_pred_raw
+            if scaler_in is not None:
+                try:
+                    X_scaled = scaler_in.transform(X_pred_raw.values)
+                    X_in = pd.DataFrame(X_scaled, columns=training_cols)
+                except Exception:
+                    X_in = X_pred_raw  # trees are robust to unscaled data
+        
+            # 3) Predict rating
+            rating_model = models.get("rating_xgb") or models.get("rating") or models.get("rating_model")
+            if rating_model is not None:
+                try:
+                    predicted_rating = _predict_agnostic(rating_model, X_in, training_cols)
+                    predicted_rating = float(np.clip(predicted_rating, 0.0, 10.0))
+                except Exception:
                     predicted_rating = float(neighbors["AvgRating"].mean())
-            
-                # 4) Predict owners (prefer RF, else Poisson XGB)
-                owners_model = models.get("owned_rf") or models.get("owned_xgb")
-                if owners_model is not None:
-                    try:
-                        owners_val = _predict_agnostic(owners_model, X_pred, training_cols)
-                        predicted_owners = int(max(0, owners_val))
-                    except Exception:
-                        predicted_owners = int(neighbors["Owned Users"].median())
-                else:
+            else:
+                predicted_rating = float(neighbors["AvgRating"].mean())
+        
+            # 4) Predict owners
+            owners_model = models.get("owned_rf") or models.get("owned_xgb")
+            if owners_model is not None:
+                try:
+                    owners_val = _predict_agnostic(owners_model, X_in, training_cols)
+                    predicted_owners = int(max(0, owners_val))
+                except Exception:
                     predicted_owners = int(neighbors["Owned Users"].median())
-            
-                # 5) Confidence & percentile
-                percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
-                d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
-                confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
-            
+            else:
+                predicted_owners = int(neighbors["Owned Users"].median())
+        
+            # 5) Confidence & percentile
+            percentile = stats.percentileofscore(view_f["AvgRating"], predicted_rating)
+            d = neighbors["__dist"]; denom = (d.std() if d.std() > 1e-6 else 1.0)
+            confidence = int(np.clip(70 + (1 - d.mean()/denom)*20, 40, 95))
+
             # Create the 4 metric columns (used below)
             pred_cols = st.columns(4)
 
-            
-            
             with pred_cols[0]:
                 st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
                 st.metric("Predicted Rating", f"{predicted_rating:.2f}/10")
@@ -2658,3 +2671,4 @@ narr("""
 **Bottom line.** Games do not suck anymore. The average modern title beats the classics that started the boom. The reason is simple. Designers learned to respect time, clarify decisions, and make the first play feel good. Go make that game.
 """)
 st.markdown("---")
+
