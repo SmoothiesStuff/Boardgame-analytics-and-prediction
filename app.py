@@ -1173,11 +1173,11 @@ try:
         relaxed = False
         
     keep = counts[counts >= min_per_cluster].index.tolist()
-    if keep:
-        view_f = view_f[view_f["Cluster"].isin(keep)].copy()
-    else:
-        st.error("No clusters meet the minimum size requirement.")
-        st.stop()
+    # if keep:
+    #     view_f = view_f[view_f["Cluster"].isin(keep)].copy()
+    # else:
+    #     st.error("No clusters meet the minimum size requirement.")
+    #     st.stop()
     # Apply filter
     if len(keep) < len(counts):
         view_f = view_f[view_f["Cluster"].isin(keep)].copy()
@@ -2723,6 +2723,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
