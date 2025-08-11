@@ -1023,65 +1023,60 @@ st.markdown("*Transform market data into actionable design decisions with AI-pow
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Sidebar with enhanced controls
+# Sidebar with enhanced controls (APPLY to commit)
 st.sidebar.title("🎮 Control Panel")
 st.sidebar.markdown("---")
-try:
-    # Always load from the default dataset paths (no upload control)
-    df = load_df(None)  # or just load_df() if you set a default arg
-    
-    # Advanced filtering controls
+
+df = load_df(None)  # still cached by @st.cache_data
+
+# --- dynamic bounds from data ---
+year_col = "Year Published"
+min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
+display_min_year = max(1900, min_year)
+
+weight_col = "GameWeight"
+
+# --- one-time defaults for 'applied' filters ---
+if "applied_filters" not in st.session_state:
+    st.session_state.applied_filters = {
+        "k": 10,
+        "topn": 20,
+        "yr_rng": (max(1950, display_min_year), max_year),
+        "wt_rng": (1.5, 4.0),
+        "pt_rng_hrs": (0.5, 3.0),
+        "pl_rng": (2, 6),
+        "age_rng": (8, 14),
+        "mech_mode": "Any",
+        "theme_mode": "Any",
+        "mechs": [],
+        "themes": [],
+        "show_narrative": True,
+    }
+
+# --- build the form (no recompute until Apply) ---
+with st.sidebar.form("control_form", clear_on_submit=False):
     st.sidebar.markdown("### Analysis Parameters")
-    k = st.sidebar.slider("# of Clusters", 2, 20, 10, 
-                          help="Higher values create more specific market segments")
-    topn = st.sidebar.slider("Comparison Pool Size", 5, 50, 20,
-                             help="Number of similar games to analyze")
-    
+    k_tmp = st.slider("# of Clusters", 2, 20, st.session_state.applied_filters["k"])
+    topn_tmp = st.slider("Comparison Pool Size", 5, 50, st.session_state.applied_filters["topn"])
+
     st.sidebar.markdown("### Market Filters ")
-    year_col = "Year Published"
-    min_year, max_year = int(df[year_col].min()), int(df[year_col].max())
-    display_min_year = max(1900, min_year)
-    
-    yr_rng = st.sidebar.slider(
-        "📅 Year Range 📅", 
-        display_min_year, max_year, 
-        (max(1950, display_min_year), max_year),
-        help="Focus on specific time periods"
-    )
-    
-    weight_col = "GameWeight"
-    min_w, max_w = float(df[weight_col].min()), float(df[weight_col].max())
-    wt_rng = st.sidebar.slider(
-        "🧩 Complexity Range 🧩", 
-        1.0, 5.0, 
-        (1.5, 4.0),
-        step=0.1,
-        help="1=Very Simple, 5=Very Complex"
-    )
-    
-    pt_rng_hrs = st.sidebar.slider(
-        "⏱️ Play Time (hours) ⏱️", 
-        0.25, 6.0, 
-        (0.5, 3.0), 
-        step=0.25,
-        help="Target game duration"
-    )
-    
-    pl_min, pl_max = st.sidebar.slider(
-        "👥 Player Count Range", 
-        1, 12,
-        (2, 6),
-        help="Supported player counts"
-    )
-    
-    age_rng = st.sidebar.slider(
-        "👶 Age Range 👴", 
-        3, 18, 
-        (8, 14),
-        help="Minimum age requirements"
-    )
-    
-    # Mechanic and theme filtering
-    with st.sidebar.expander("🎲 Mechanics & Themes 🎲", expanded=False):
+    yr_rng_tmp = st.slider("📅 Year Range 📅",
+                           display_min_year, max_year,
+                           st.session_state.applied_filters["yr_rng"])
+    wt_rng_tmp = st.slider("🧩 Complexity Range 🧩",
+                           1.0, 5.0,
+                           st.session_state.applied_filters["wt_rng"], step=0.1)
+    pt_rng_hrs_tmp = st.slider("⏱️ Play Time (hours) ⏱️",
+                               0.25, 6.0,
+                               st.session_state.applied_filters["pt_rng_hrs"], step=0.25)
+    pl_min_tmp, pl_max_tmp = st.slider("👥 Player Count Range",
+                                       1, 12,
+                                       st.session_state.applied_filters["pl_rng"])
+    age_rng_tmp = st.slider("👶 Age Range 👴",
+                            3, 18,
+                            st.session_state.applied_filters["age_rng"])
+
+    with st.expander("🎲 Mechanics & Themes 🎲", expanded=False):
         mech_cols = [c for c in df.columns if c.startswith("Mechanic_") or c in [
             "Deck Construction", "Hand Management", "Worker Placement", "Cooperative Game",
             "Dice Rolling", "Set Collection", "Action Points", "Variable Player Powers"
@@ -1089,26 +1084,61 @@ try:
         theme_cols = [c for c in df.columns if c.startswith("Cat:") or c in [
             "Fantasy", "Adventure", "Economic", "Science Fiction", "War", "Horror"
         ]]
-        
-        mech_match_mode = st.radio("Mechanic Match", ["Any", "All"], horizontal=True)
-        selected_mechs = st.multiselect("Select Mechanics", mech_cols[:30], default=[])
-        
-        theme_match_mode = st.radio("Theme Match", ["Any", "All"], horizontal=True)
-        selected_themes = st.multiselect("Select Themes", theme_cols[:20], default=[])
-    
+
+        mech_mode_tmp = st.radio("Mechanic Match", ["Any", "All"],
+                                 horizontal=True,
+                                 index=(0 if st.session_state.applied_filters["mech_mode"] == "Any" else 1))
+        mechs_tmp = st.multiselect("Select Mechanics",
+                                   mech_cols[:30],
+                                   default=st.session_state.applied_filters["mechs"])
+
+        theme_mode_tmp = st.radio("Theme Match", ["Any", "All"],
+                                  horizontal=True,
+                                  index=(0 if st.session_state.applied_filters["theme_mode"] == "Any" else 1))
+        themes_tmp = st.multiselect("Select Themes",
+                                    theme_cols[:20],
+                                    default=st.session_state.applied_filters["themes"])
+
     st.sidebar.markdown("---")
-    st.sidebar.caption("💡 **Tip:** Use filters to focus on your target market segment for more accurate insights")
-    ########## narrative toggle + helper ##########
-    st.sidebar.markdown("### 📝 Narrative")
-    st.sidebar.checkbox("Show narrative insights", True, key="show_narrative")
-    
-    def narr(md: str):
-        if st.session_state.get("show_narrative", True):
-            bl = "> " + md.strip().replace("\n", "\n> ")
-            st.markdown(bl)
-    
-    # Convert play time range to minutes
-    pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
+    show_narrative_tmp = st.checkbox("Show narrative insights",
+                                     value=st.session_state.applied_filters["show_narrative"])
+
+    apply_filters = st.form_submit_button("✅ Apply filters", use_container_width=True)
+
+# --- commit on Apply (and optionally rerun to refresh UI quickly) ---
+if apply_filters:
+    st.session_state.applied_filters.update({
+        "k": k_tmp,
+        "topn": topn_tmp,
+        "yr_rng": yr_rng_tmp,
+        "wt_rng": wt_rng_tmp,
+        "pt_rng_hrs": pt_rng_hrs_tmp,
+        "pl_rng": (pl_min_tmp, pl_max_tmp),
+        "age_rng": age_rng_tmp,
+        "mech_mode": mech_mode_tmp,
+        "theme_mode": theme_mode_tmp,
+        "mechs": mechs_tmp,
+        "themes": themes_tmp,
+        "show_narrative": show_narrative_tmp,
+    })
+    st.experimental_rerun()
+
+# --- use only the 'applied' values below this line ---
+ap = st.session_state.applied_filters
+k = ap["k"]
+topn = ap["topn"]
+yr_rng = ap["yr_rng"]
+wt_rng = ap["wt_rng"]
+pt_rng_hrs = ap["pt_rng_hrs"]
+pl_min, pl_max = ap["pl_rng"]
+age_rng = ap["age_rng"]
+mech_match_mode, selected_mechs = ap["mech_mode"], ap["mechs"]
+theme_match_mode, selected_themes = ap["theme_mode"], ap["themes"]
+st.session_state["show_narrative"] = ap["show_narrative"]  # keep your narr() helper working
+
+# Convert play time range to minutes AFTER applying
+pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
+
     
     # Prepare data and clustering
     X_all, meta = split_features(df)
@@ -2735,6 +2765,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
