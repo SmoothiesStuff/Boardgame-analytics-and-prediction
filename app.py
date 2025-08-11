@@ -1121,7 +1121,7 @@ if apply_filters:
         "themes": themes_tmp,
         "show_narrative": show_narrative_tmp,
     })
-    st.experimental_rerun()
+    #st.experimental_rerun()
 
 # --- use only the 'applied' values below this line ---
 ap = st.session_state.applied_filters
@@ -2754,6 +2754,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
