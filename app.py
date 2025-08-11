@@ -1178,7 +1178,7 @@ try:
     else:
         st.error("No clusters meet the minimum size requirement.")
         st.stop()
-    Apply filter
+    #Apply filter
     if len(keep) < len(counts):
         view_f = view_f[view_f["Cluster"].isin(keep)].copy()
         msg = f"Filtered segments below {min_per_cluster} games."
@@ -2723,6 +2723,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
