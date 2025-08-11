@@ -1162,7 +1162,7 @@ try:
     counts = view_f["Cluster"].value_counts().sort_values(ascending=False)
     dropped = counts[counts < min_per_cluster]
     
-    # Set initial keep list BEFORE using it
+    # Set initial keep list 
     keep = counts[counts >= min_per_cluster].index.tolist()
     
     # If we dropped too many, relax to keep at least 60% of segments (but >=2)
@@ -1199,7 +1199,7 @@ try:
         small_preview = ", ".join([f"{int(i)}({int(n)})" for i, n in dropped.items() if i in set(counts.index) - set(keep)])
         if small_preview:
             msg += f" Dropped: {small_preview}"
-        st.caption(msg)
+        #st.caption(msg)
 
 except Exception as e:
     _self_heal_reset_and_rerun("DATA/CLUSTER", e)
@@ -2735,6 +2735,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
