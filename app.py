@@ -1157,7 +1157,7 @@ try:
     view_f = view[mask].copy()
     # ---- Adaptive segment pruning by size ----
     n_visible = len(view_f)
-    min_per_cluster = adaptive_min_cluster_size(n_visible, k, floor=15, frac_of_avg=0.150)
+    min_per_cluster = adaptive_min_cluster_size(n_visible, k, floor=15, frac_of_avg=0.05)
     
     counts = view_f["Cluster"].value_counts().sort_values(ascending=False)
     dropped = counts[counts < min_per_cluster]
@@ -2735,6 +2735,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
