@@ -1160,24 +1160,36 @@ try:
     min_per_cluster = adaptive_min_cluster_size(n_visible, k, floor=40, frac_of_avg=0.40)
     
     counts = view_f["Cluster"].value_counts().sort_values(ascending=False)
-
     dropped = counts[counts < min_per_cluster]
+    
+    # Set initial keep list BEFORE using it
+    keep = counts[counts >= min_per_cluster].index.tolist()
     
     # If we dropped too many, relax to keep at least 60% of segments (but >=2)
     min_segments_to_keep = max(2, math.ceil(0.60 * len(counts)))
     if len(keep) < min_segments_to_keep:
-        # keep the top N largest clusters
         keep = counts.head(min_segments_to_keep).index.tolist()
         relaxed = True
     else:
         relaxed = False
-        
-    keep = counts[counts >= min_per_cluster].index.tolist()
+    
+    # Apply filter
     if keep:
         view_f = view_f[view_f["Cluster"].isin(keep)].copy()
+        if len(keep) < len(counts):
+            msg = f"Filtered segments below {min_per_cluster} games."
+            if relaxed:
+                msg += " Relaxed threshold to keep top segments by size."
+            small_preview = ", ".join([f"{int(i)}({int(n)})" 
+                                       for i, n in dropped.items() 
+                                       if i not in keep])
+            if small_preview:
+                msg += f" Dropped: {small_preview}"
+            st.caption(msg)
     else:
         st.error("No clusters meet the minimum size requirement.")
         st.stop()
+
     #Apply filter
     if len(keep) < len(counts):
         view_f = view_f[view_f["Cluster"].isin(keep)].copy()
@@ -2723,6 +2735,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
