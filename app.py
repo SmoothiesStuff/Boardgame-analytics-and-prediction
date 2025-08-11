@@ -1334,7 +1334,8 @@ with tab_intel:
             st.caption(f"Opportunity Score")
             st.write(f"📊 {data['size']} games")
             st.write(f"⭐ {data['avg_rating']:.2f} avg")
-            st.write(f"🎯 Example: {data['top_game'][:]}...")
+            # st.write(f"🎯 Example: {data['top_game'][:]}...")
+            st.markdown(f"🎯 Top Game:<br>{data['top_game']}", unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
     narr("""
@@ -2680,6 +2681,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
