@@ -1140,96 +1140,96 @@ st.session_state["show_narrative"] = ap["show_narrative"]  # keep your narr() he
 pt_rng = (int(pt_rng_hrs[0] * 60), int(pt_rng_hrs[1] * 60))
 
     
-    # Prepare data and clustering
-    X_all, meta = split_features(df)
-    for _c in ("NumWish","NumWant"):
-        if _c in X_all.columns:
-            X_all = X_all.drop(columns=[_c])   #don't predict off theses
-    scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
-    
-    # Add derived features
-    df["Play Time Hours"] = df["Play Time"] / 60.0
-    df["Play Time Hours"] = df["Play Time Hours"].clip(upper=10)
-    df["Success Score"] = (df["AvgRating"] - 5) * df["Owned Users"] / 1000
-    df["Market Penetration"] = df["Owned Users"] / df["Owned Users"].max()
-    
-    view = df.copy()
-    view["Cluster"] = labels
-    view["PCA1"] = coords[:, 0]
-    view["PCA2"] = coords[:, 1]
-    
-    # Apply filters
-    mask = pd.Series(True, index=view.index)
-    mask &= view[year_col].between(yr_rng[0], yr_rng[1])
-    mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
-    mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])
-    
-    if all(col in view.columns for col in ["Min Players", "Max Players"]):
-        mask &= (view["Max Players"] >= pl_min) & (view["Min Players"] <= pl_max)
-    
-    if "Min Age" in view.columns:
-        mask &= view["Min Age"].between(age_rng[0], age_rng[1])
-    
-    # Apply mechanic filters
-    if selected_mechs:
-        mech_masks = [view[m] == 1 for m in selected_mechs if m in view.columns]
-        if mech_masks:
-            mech_combined = pd.concat(mech_masks, axis=1)
-            mask &= mech_combined.any(axis=1) if mech_match_mode == "Any" else mech_combined.all(axis=1)
-    
-    # Apply theme filters  
-    if selected_themes:
-        theme_masks = [view[t] == 1 for t in selected_themes if t in view.columns]
-        if theme_masks:
-            theme_combined = pd.concat(theme_masks, axis=1)
-            mask &= theme_combined.any(axis=1) if theme_match_mode == "Any" else theme_combined.all(axis=1)
-    
-    view_f = view[mask].copy()
-    # ---- Adaptive segment pruning by size ----
-    n_visible = len(view_f)
-    min_per_cluster = adaptive_min_cluster_size(n_visible, k, floor=15, frac_of_avg=0.05)
-    
-    counts = view_f["Cluster"].value_counts().sort_values(ascending=False)
-    dropped = counts[counts < min_per_cluster]
-    
-    # Set initial keep list 
-    keep = counts[counts >= min_per_cluster].index.tolist()
-    
-    # If we dropped too many, relax to keep at least 60% of segments (but >=2)
-    min_segments_to_keep = max(2, math.ceil(0.80 * len(counts)))
-    if len(keep) < min_segments_to_keep:
-        keep = counts.head(min_segments_to_keep).index.tolist()
-        relaxed = True
-    else:
-        relaxed = False
-    
-    # Apply filter
-    if keep:
-        view_f = view_f[view_f["Cluster"].isin(keep)].copy()
-        if len(keep) < len(counts):
-            msg = f"Filtered segments below {min_per_cluster} games."
-            if relaxed:
-                msg += " Relaxed threshold to keep top segments by size."
-            small_preview = ", ".join([f"{int(i)}({int(n)})" 
-                                       for i, n in dropped.items() 
-                                       if i not in keep])
-            if small_preview:
-                msg += f" Dropped: {small_preview}"
-            st.caption(msg)
-    else:
-        st.error("No clusters meet the minimum size requirement.")
-        st.stop()
+# Prepare data and clustering
+X_all, meta = split_features(df)
+for _c in ("NumWish","NumWant"):
+    if _c in X_all.columns:
+        X_all = X_all.drop(columns=[_c])   #don't predict off theses
+scaler, kmeans, pca, labels, coords = fit_clusterer(X_all, k=k)
 
-    #Apply filter
+# Add derived features
+df["Play Time Hours"] = df["Play Time"] / 60.0
+df["Play Time Hours"] = df["Play Time Hours"].clip(upper=10)
+df["Success Score"] = (df["AvgRating"] - 5) * df["Owned Users"] / 1000
+df["Market Penetration"] = df["Owned Users"] / df["Owned Users"].max()
+
+view = df.copy()
+view["Cluster"] = labels
+view["PCA1"] = coords[:, 0]
+view["PCA2"] = coords[:, 1]
+
+# Apply filters
+mask = pd.Series(True, index=view.index)
+mask &= view[year_col].between(yr_rng[0], yr_rng[1])
+mask &= view[weight_col].between(wt_rng[0], wt_rng[1])
+mask &= view["Play Time"].between(pt_rng[0], pt_rng[1])
+
+if all(col in view.columns for col in ["Min Players", "Max Players"]):
+    mask &= (view["Max Players"] >= pl_min) & (view["Min Players"] <= pl_max)
+
+if "Min Age" in view.columns:
+    mask &= view["Min Age"].between(age_rng[0], age_rng[1])
+
+# Apply mechanic filters
+if selected_mechs:
+    mech_masks = [view[m] == 1 for m in selected_mechs if m in view.columns]
+    if mech_masks:
+        mech_combined = pd.concat(mech_masks, axis=1)
+        mask &= mech_combined.any(axis=1) if mech_match_mode == "Any" else mech_combined.all(axis=1)
+
+# Apply theme filters  
+if selected_themes:
+    theme_masks = [view[t] == 1 for t in selected_themes if t in view.columns]
+    if theme_masks:
+        theme_combined = pd.concat(theme_masks, axis=1)
+        mask &= theme_combined.any(axis=1) if theme_match_mode == "Any" else theme_combined.all(axis=1)
+
+view_f = view[mask].copy()
+# ---- Adaptive segment pruning by size ----
+n_visible = len(view_f)
+min_per_cluster = adaptive_min_cluster_size(n_visible, k, floor=15, frac_of_avg=0.05)
+
+counts = view_f["Cluster"].value_counts().sort_values(ascending=False)
+dropped = counts[counts < min_per_cluster]
+
+# Set initial keep list 
+keep = counts[counts >= min_per_cluster].index.tolist()
+
+# If we dropped too many, relax to keep at least 60% of segments (but >=2)
+min_segments_to_keep = max(2, math.ceil(0.80 * len(counts)))
+if len(keep) < min_segments_to_keep:
+    keep = counts.head(min_segments_to_keep).index.tolist()
+    relaxed = True
+else:
+    relaxed = False
+
+# Apply filter
+if keep:
+    view_f = view_f[view_f["Cluster"].isin(keep)].copy()
     if len(keep) < len(counts):
-        view_f = view_f[view_f["Cluster"].isin(keep)].copy()
         msg = f"Filtered segments below {min_per_cluster} games."
         if relaxed:
             msg += " Relaxed threshold to keep top segments by size."
-        small_preview = ", ".join([f"{int(i)}({int(n)})" for i, n in dropped.items() if i in set(counts.index) - set(keep)])
+        small_preview = ", ".join([f"{int(i)}({int(n)})" 
+                                   for i, n in dropped.items() 
+                                   if i not in keep])
         if small_preview:
             msg += f" Dropped: {small_preview}"
-        #st.caption(msg)
+        st.caption(msg)
+else:
+    st.error("No clusters meet the minimum size requirement.")
+    st.stop()
+
+#Apply filter
+if len(keep) < len(counts):
+    view_f = view_f[view_f["Cluster"].isin(keep)].copy()
+    msg = f"Filtered segments below {min_per_cluster} games."
+    if relaxed:
+        msg += " Relaxed threshold to keep top segments by size."
+    small_preview = ", ".join([f"{int(i)}({int(n)})" for i, n in dropped.items() if i in set(counts.index) - set(keep)])
+    if small_preview:
+        msg += f" Dropped: {small_preview}"
+    #st.caption(msg)
 
 except Exception as e:
     _self_heal_reset_and_rerun("DATA/CLUSTER", e)
@@ -2765,6 +2765,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
