@@ -1000,6 +1000,7 @@ def load_models(paths: Dict[str, str]):
             pass
     
     return models
+
 # ========= SAFETY: self-heal helpers (add below load_models, above "Main UI starts here") =========
 def _self_heal_reset_and_rerun(stage: str, err: Exception):
     st.warning(f"Recovered from a {stage} error: {type(err).__name__}: {err}")
@@ -1159,7 +1160,7 @@ try:
     min_per_cluster = adaptive_min_cluster_size(n_visible, k, floor=40, frac_of_avg=0.40)
     
     counts = view_f["Cluster"].value_counts().sort_values(ascending=False)
-    keep = counts[counts >= min_per_cluster].index.tolist()
+
     dropped = counts[counts < min_per_cluster]
     
     # If we dropped too many, relax to keep at least 60% of segments (but >=2)
@@ -1170,7 +1171,13 @@ try:
         relaxed = True
     else:
         relaxed = False
-    
+        
+    keep = counts[counts >= min_per_cluster].index.tolist()
+        if keep:
+            view_f = view_f[view_f["Cluster"].isin(keep)].copy()
+        else:
+            st.error("No clusters meet the minimum size requirement.")
+            st.stop()
     # Apply filter
     if len(keep) < len(counts):
         view_f = view_f[view_f["Cluster"].isin(keep)].copy()
@@ -1635,7 +1642,7 @@ with tab_wizard:
                 
                 try:
                     # 0) Models already loaded above:
-                    # models = load_models(MODEL_PATHS)
+                    models = load_models(MODEL_PATHS)
                 
                     # 1) Resolve training feature order
                     scaler_in = models.get("_input_scaler")
@@ -2716,6 +2723,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
