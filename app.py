@@ -368,6 +368,9 @@ def adaptive_min_cluster_size(n_visible: int, k: int, floor: int = 40, frac_of_a
     avg = n_visible / float(k)
     return int(max(floor, math.ceil(frac_of_avg * avg)))
 
+def narr(text):
+    st.markdown(f"<div class='narrative'>{text}</div>", unsafe_allow_html=True)
+
 def fit_clusterer(X: pd.DataFrame, k: int = 8, random_state: int = 42):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -2754,6 +2757,7 @@ Designers learned to respect time, balance rules, create novel mechanics, and ma
 You have to find a demand and then follow that model.
 """)
 st.markdown("---")
+
 
 
 
