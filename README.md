@@ -4,6 +4,9 @@ data processing, ML, analytics, and a Streamlit app on Boardgame data from BGG
 Access Dashboard at: 
 https://boardgame-analytics-and-prediction-enmcp3dmzdqkqtebyztjoe.streamlit.app/
 
+Github repo:
+https://github.com/SmoothiesStuff/Boardgame-analytics-and-prediction
+
 Text (208)608-3279 if the dashboard crashes so I can reboot it. 
 
 # Board Game Developer Console
